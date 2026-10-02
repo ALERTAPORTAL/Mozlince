@@ -68,6 +68,7 @@ app.post('/gerar-licenca', (req, res) => {
 });
 
 app.post('/telegram-webhook', async (req, res) => {
+  console.log('WEBHOOK RECEBIDO:', JSON.stringify(req.body));
   const update = req.body;
 
   // Callback de botões inline
