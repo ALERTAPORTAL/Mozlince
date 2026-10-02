@@ -8,7 +8,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const privateKey = fs.readFileSync('private.key');
+const privateKey = process.env.PRIVATE_KEY;
 
 app.get('/', (req, res) => {
   res.json({ status: 'Servidor de licencas rodando!' });
@@ -32,7 +32,7 @@ app.post('/verificar-licenca', (req, res) => {
   if (!token) {
     return res.status(400).json({ erro: 'Token e obrigatorio' });
   }
-  const publicKey = fs.readFileSync('public.key');
+  const publicKey = process.env.PUBLIC_KEY;
   try {
     const decoded = jwt.verify(token, publicKey, { algorithms: ['RS256'] });
     res.json({ valido: true, dados: decoded });
