@@ -51,7 +51,7 @@ function generateLicenseToken(installId, plan, days) {
     deviceSecret: 'segredo-' + installId,
     exp: Math.floor(Date.now() / 1000) + (days * 24 * 60 * 60)
   };
-  return jwt.sign(payload, privateKey, { algorithm: 'RS256', expiresIn: expiresIn });
+  return jwt.sign(payload, privateKey, { algorithm: 'RS256' });
 }
 
 app.post('/gerar-licenca', (req, res) => {
