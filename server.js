@@ -1,20 +1,31 @@
+require('dotenv').config();
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const privateKey = process.env.PRIVATE_KEY.replace(/\\n/g, '\n');
-  console.log('PRIVATE_KEY length:', privateKey ? privateKey.length : 'undefined');
-  console.log('PRIVATE_KEY starts with:', privateKey ? privateKey.substring(0, 40) : 'undefined');
-  console.log('PRIVATE_KEY ends with:', privateKey ? privateKey.substring(privateKey.length - 40) : 'undefined');
 const publicKey = process.env.PUBLIC_KEY.replace(/\\n/g, '\n');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const OWNER_ID = process.env.OWNER_ID; // Seu Chat ID do Telegram
+const OWNER_ID = process.env.OWNER_ID;
 
-const licenses = new Map();
+// Banco de dados em memória
+const licenses = new Map(); // chave -> { installId, plan, days, createdAt, active, token }
+
+// Gera uma chave no formato ASHEO-XXXX-XXXX-XXXX-XXXX
+function generateLicenseKey() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem letras/números confusos
+  const block = () => {
+    let s = '';
+    for (let i = 0; i < 4; i++) s += chars[crypto.randomInt(0, chars.length)];
+    return s;
+  };
+  return `ASHEO-${block()}-${block()}-${block()}-${block()}`;
+}
 
 async function sendTelegramMessage(chatId, text, keyboard = null) {
   const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
@@ -37,7 +48,6 @@ async function answerCallbackQuery(callbackQueryId, text) {
 }
 
 function generateLicenseToken(installId, plan, days) {
-  const expiresIn = days === 3650 ? '3650d' : `${days}d`;
   const payload = {
     installId: installId,
     status: 'active',
@@ -54,30 +64,74 @@ function generateLicenseToken(installId, plan, days) {
   return jwt.sign(payload, privateKey, { algorithm: 'RS256' });
 }
 
+// ============================================================================
+// ENDPOINT PARA A EXTENSÃO (usando a chave amigável)
+// ============================================================================
+
 app.post('/gerar-licenca', (req, res) => {
-  const { userId, installId, days } = req.body;
-  if (!userId && !installId) return res.status(400).json({ erro: 'userId ou installId e obrigatorio' });
+  const { userId, installId, licenseKey } = req.body;
   const id = installId || userId;
-  const duration = days || 30;
-  const token = generateLicenseToken(id, 'premium', duration);
-  licenses.set(id, { installId: id, token, createdAt: Date.now(), active: true, plan: 'premium', days: duration });
+
+  if (!id) {
+    return res.status(400).json({ erro: 'installId ou userId e obrigatorio' });
+  }
+
+  // Se uma chave de licença foi fornecida, verifica se ela existe
+  if (licenseKey) {
+    const lic = licenses.get(licenseKey);
+    if (!lic) {
+      return res.status(404).json({ erro: 'Chave de licenca invalida' });
+    }
+    if (!lic.active) {
+      return res.status(403).json({ erro: 'Licenca revogada' });
+    }
+    const expDate = lic.createdAt + lic.days * 24 * 60 * 60 * 1000;
+    if (Date.now() > expDate) {
+      return res.status(403).json({ erro: 'Licenca expirada' });
+    }
+    // Gera o token para essa chave
+    const token = generateLicenseToken(id, lic.plan, lic.days);
+    return res.json({
+      token,
+      licenseKey: licenseKey,
+      deviceSecret: 'segredo-' + id,
+      status: 'active',
+      plan: lic.plan,
+      days: lic.days,
+      features: { advanced_automation: true, multi_account: true, cloud_sync: true, priority_support: true, custom_export: true, api_access: true }
+    });
+  }
+
+  // Se não foi fornecida chave, gera uma nova (modo antigo, para testes)
+  const newKey = generateLicenseKey();
+  const token = generateLicenseToken(id, 'premium', 30);
+  licenses.set(newKey, {
+    installId: id, plan: 'premium', days: 30,
+    createdAt: Date.now(), active: true, token
+  });
   res.json({
-    token, deviceSecret: 'segredo-' + id, status: 'active', plan: 'premium', days: duration,
+    token,
+    licenseKey: newKey,
+    deviceSecret: 'segredo-' + id,
+    status: 'active',
+    plan: 'premium',
+    days: 30,
     features: { advanced_automation: true, multi_account: true, cloud_sync: true, priority_support: true, custom_export: true, api_access: true }
   });
 });
 
+// ============================================================================
+// WEBHOOK DO TELEGRAM
+// ============================================================================
+
 app.post('/telegram-webhook', async (req, res) => {
-  console.log('WEBHOOK RECEBIDO:', JSON.stringify(req.body));
   const update = req.body;
 
-  // Callback de botões inline
   if (update.callback_query) {
     const cb = update.callback_query;
     const chatId = cb.message.chat.id;
     const data = cb.data;
 
-    // Verifica se é o dono
     if (String(chatId) !== String(OWNER_ID)) {
       await answerCallbackQuery(cb.id, '⛔ Você não tem permissão.');
       return res.sendStatus(200);
@@ -87,14 +141,22 @@ app.post('/telegram-webhook', async (req, res) => {
       const parts = data.split('_');
       const days = parseInt(parts[1]);
       const installId = parts[2];
+
+      // Gera uma chave amigável
+      const licenseKey = generateLicenseKey();
       const token = generateLicenseToken(installId, 'premium', days);
-      licenses.set(installId, { installId, token, createdAt: Date.now(), active: true, plan: 'premium', days });
-      await answerCallbackQuery(cb.id, `Licença de ${days === 3650 ? 'Ilimitada' : days + ' dias'} gerada!`);
+      licenses.set(licenseKey, {
+        installId, plan: 'premium', days,
+        createdAt: Date.now(), active: true, token
+      });
+
+      await answerCallbackQuery(cb.id, `Licença gerada!`);
       await sendTelegramMessage(chatId,
         `✅ *Licença gerada!*\n\n` +
+        `*Chave:* \`${licenseKey}\`\n` +
         `*Install ID:* \`${installId}\`\n` +
-        `*Duração:* ${days === 3650 ? 'Ilimitada' : days + ' dias'}\n` +
-        `*Token:*\n\`${token}\``
+        `*Duração:* ${days === 3650 ? 'Ilimitada' : days + ' dias'}\n\n` +
+        `Use a chave acima na extensão Asheo.`
       );
     }
     return res.sendStatus(200);
@@ -107,7 +169,6 @@ app.post('/telegram-webhook', async (req, res) => {
   const args = text.split(' ');
   const command = args[0].toLowerCase();
 
-  // ⛔ BLOQUEIO: Apenas o dono pode usar o bot
   if (String(chatId) !== String(OWNER_ID)) {
     await sendTelegramMessage(chatId, '⛔ Você não tem permissão para usar este bot.');
     return res.sendStatus(200);
@@ -118,9 +179,9 @@ app.post('/telegram-webhook', async (req, res) => {
       await sendTelegramMessage(chatId,
         `👋 *Bem-vindo, Dono!*\n\n` +
         `Comandos:\n` +
-        `/gerar <installId> - Gera licença\n` +
-        `/status <installId> - Verifica status\n` +
-        `/revogar <installId> - Revoga licença\n` +
+        `/gerar <installId> - Gera uma chave de licença\n` +
+        `/status <chave> - Verifica o status\n` +
+        `/revogar <chave> - Revoga uma licença\n` +
         `/listar - Lista todas as licenças`
       );
     } 
@@ -136,30 +197,37 @@ app.post('/telegram-webhook', async (req, res) => {
       await sendTelegramMessage(chatId, `📅 *Escolha a duração para* \`${installId}\`:`, keyboard);
     } 
     else if (command === '/status') {
-      const installId = args[1];
-      if (!installId) { await sendTelegramMessage(chatId, '⚠️ Use: `/status <installId>`'); return res.sendStatus(200); }
-      const lic = licenses.get(installId);
+      const licenseKey = args[1];
+      if (!licenseKey) { await sendTelegramMessage(chatId, '⚠️ Use: `/status <chave>`'); return res.sendStatus(200); }
+      const lic = licenses.get(licenseKey);
       if (lic) {
         const expDate = new Date(lic.createdAt + lic.days * 24 * 60 * 60 * 1000);
         await sendTelegramMessage(chatId,
-          `📋 *Status*\n\n*Install ID:* \`${installId}\`\n*Plano:* ${lic.plan}\n` +
+          `📋 *Status*\n\n*Chave:* \`${licenseKey}\`\n*Install ID:* \`${lic.installId}\`\n` +
           `*Duração:* ${lic.days === 3650 ? 'Ilimitada' : lic.days + ' dias'}\n*Expira em:* ${expDate.toLocaleString()}\n*Ativa:* ${lic.active ? 'Sim' : 'Não'}`
         );
       } else {
-        await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${installId}\`.`);
+        await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${licenseKey}\`.`);
       }
     } 
     else if (command === '/revogar') {
-      const installId = args[1];
-      if (!installId) { await sendTelegramMessage(chatId, '⚠️ Use: `/revogar <installId>`'); return res.sendStatus(200); }
-      if (licenses.has(installId)) { licenses.delete(installId); await sendTelegramMessage(chatId, `🗑️ Licença de \`${installId}\` revogada.`); }
-      else { await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${installId}\`.`); }
+      const licenseKey = args[1];
+      if (!licenseKey) { await sendTelegramMessage(chatId, '⚠️ Use: `/revogar <chave>`'); return res.sendStatus(200); }
+      if (licenses.has(licenseKey)) { 
+        const lic = licenses.get(licenseKey);
+        lic.active = false;
+        licenses.set(licenseKey, lic);
+        await sendTelegramMessage(chatId, `🗑️ Licença \`${licenseKey}\` revogada.`); 
+      }
+      else { await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${licenseKey}\`.`); }
     } 
     else if (command === '/listar') {
       if (licenses.size === 0) { await sendTelegramMessage(chatId, '📭 Nenhuma licença ativa.'); }
       else {
         let msg = `📋 *Licenças Ativas (${licenses.size})*\n\n`;
-        for (const [id, lic] of licenses) { msg += `• \`${id}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'}\n`; }
+        for (const [key, lic] of licenses) { 
+          msg += `• \`${key}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'} - ${lic.active ? 'Ativa' : 'Revogada'}\n`; 
+        }
         await sendTelegramMessage(chatId, msg);
       }
     } 
