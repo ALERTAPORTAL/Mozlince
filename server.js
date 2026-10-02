@@ -7,6 +7,9 @@ app.use(cors());
 app.use(express.json());
 
 const privateKey = process.env.PRIVATE_KEY.replace(/\\n/g, '\n');
+  console.log('PRIVATE_KEY length:', privateKey ? privateKey.length : 'undefined');
+  console.log('PRIVATE_KEY starts with:', privateKey ? privateKey.substring(0, 40) : 'undefined');
+  console.log('PRIVATE_KEY ends with:', privateKey ? privateKey.substring(privateKey.length - 40) : 'undefined');
 const publicKey = process.env.PUBLIC_KEY.replace(/\\n/g, '\n');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID; // Seu Chat ID do Telegram
