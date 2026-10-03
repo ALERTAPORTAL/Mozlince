@@ -189,7 +189,7 @@ app.post('/telegram-webhook', async (req, res) => {
       await sendTelegramMessage(chatId,
         `👋 *Bem-vindo!*\n\n` +
         `/gerar - Gera licença\n` +
-        `/vincular <installId> <chave> - Vincula chave ao Install ID\n` +
+        `/activate <installId> <chave> - Vincula chave ao Install ID\n` +
         `/status <chave> - Verifica status\n` +
         `/revogar <chave> - Revoga\n` +
         `/listar - Lista todas`
@@ -202,13 +202,16 @@ app.post('/telegram-webhook', async (req, res) => {
         ]
       };
       await sendTelegramMessage(chatId, `📅 *Escolha a duração:*`, keyboard);
-    } else if (command === '/vincular') {
-      const installId = args[1];
-      const licenseKey = args[2];
+    } else if (command === '/activate') {
+      // Pega o Install ID (tudo entre o comando e a última palavra)
+      const installId = args.slice(1, -1).join(' ');
+      const licenseKey = args[args.length - 1];
+
       if (!installId || !licenseKey) {
-        await sendTelegramMessage(chatId, '⚠️ Use: `/vincular <installId> <chave>`\n\nExemplo:\n`/vincular 37a52b3d-cef4-4a6a-98d9-772104c89d04 ASHEO-XXXX-XXXX-XXXX-XXXX`');
+        await sendTelegramMessage(chatId, '⚠️ Use: `/activate <installId> <chave>`\n\nExemplo:\n`/activate 37a52b3d-cef4-4a6a-98d9-772104c89d04 ASHEO-XXXX-XXXX-XXXX-XXXX`');
         return res.sendStatus(200);
       }
+
       const lic = await redisGet(licenseKey);
       if (!lic) {
         await sendTelegramMessage(chatId, `❌ Chave \`${licenseKey}\` não encontrada.`);
@@ -218,6 +221,7 @@ app.post('/telegram-webhook', async (req, res) => {
         await sendTelegramMessage(chatId, `⚠️ Chave \`${licenseKey}\` já está vinculada a outro Install ID.`);
         return res.sendStatus(200);
       }
+
       lic.installId = installId;
       await redisSet(licenseKey, JSON.stringify(lic));
       await sendTelegramMessage(chatId,
