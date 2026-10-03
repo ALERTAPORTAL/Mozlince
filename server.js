@@ -10,7 +10,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.options('*', cors());
+app.options(/.*/, cors());
 app.use(express.json());
 
 const privateKey = process.env.EC_PRIVATE_KEY.replace(/\\n/g, '\n');
