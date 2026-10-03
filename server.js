@@ -76,14 +76,21 @@ async function answerCallbackQuery(callbackQueryId, text) {
 
 function generateLicenseToken(installId, plan, days) {
   const payload = {
+    sub: installId,
     installId: installId,
     status: 'active',
     plan: plan,
+    planDisplayName: plan === 'premium' ? 'Premium' : 'Free',
     active: true,
     tier: plan,
+    kind: plan === 'premium' ? 'premium' : 'free',
     features: {
-      advanced_automation: true, multi_account: true, cloud_sync: true,
-      priority_support: true, custom_export: true, api_access: true
+      advanced_automation: true,
+      multi_account: true,
+      cloud_sync: true,
+      priority_support: true,
+      custom_export: true,
+      api_access: true
     },
     secret: 'segredo-' + installId,
     exp: Math.floor(Date.now() / 1000) + (days * 24 * 60 * 60)
@@ -282,6 +289,14 @@ app.post('/verificar-licenca', (req, res) => {
   } catch (err) {
     res.status(401).json({ valido: false, erro: err.message });
   }
+});
+
+
+// Alias: extensão chama /v1/activate -> redireciona para /activate
+app.post('/v1/activate', (req, res, next) => {
+  req.url = '/activate';
+  req.method = 'POST';
+  app._router.handle(req, res, next);
 });
 
 const PORT = process.env.PORT || 3000;
