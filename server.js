@@ -176,7 +176,10 @@ app.post('/telegram-webhook', async (req, res) => {
   if (!update.message || !update.message.text) return res.sendStatus(200);
   const chatId = update.message.chat.id;
   const text = update.message.text.trim();
-  const args = text.split(' ');
+  
+  // Remove quebras de linha e junta tudo com espaço
+  const cleanText = text.replace(/\n/g, ' ');
+  const args = cleanText.split(' ').filter(a => a.length > 0);
   const command = args[0].toLowerCase();
 
   if (String(chatId) !== String(OWNER_ID)) {
@@ -203,9 +206,9 @@ app.post('/telegram-webhook', async (req, res) => {
       };
       await sendTelegramMessage(chatId, `📅 *Escolha a duração:*`, keyboard);
     } else if (command === '/activate') {
-      // Pega o Install ID (tudo entre o comando e a última palavra)
-      const installId = args.slice(1, -1).join(' ');
+      // Pega a última palavra como chave e junta o resto como Install ID
       const licenseKey = args[args.length - 1];
+      const installId = args.slice(1, args.length - 1).join(' ');
 
       if (!installId || !licenseKey) {
         await sendTelegramMessage(chatId, '⚠️ Use: `/activate <installId> <chave>`\n\nExemplo:\n`/activate 37a52b3d-cef4-4a6a-98d9-772104c89d04 ASHEO-XXXX-XXXX-XXXX-XXXX`');
