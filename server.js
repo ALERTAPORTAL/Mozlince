@@ -8,16 +8,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Chaves ECDSA P-256 (formato PEM)
 const privateKey = process.env.EC_PRIVATE_KEY.replace(/\\n/g, '\n');
 const publicKey = process.env.EC_PUBLIC_KEY.replace(/\\n/g, '\n');
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
-// Banco de dados em memória
 const licenses = new Map();
 
-// Gera chave amigável ASHEO-XXXX-XXXX-XXXX-XXXX
 function generateLicenseKey() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const block = () => {
@@ -65,30 +62,17 @@ function generateLicenseToken(installId, plan, days) {
   return jwt.sign(payload, privateKey, { algorithm: 'ES256' });
 }
 
-// ============================================================================
-// ENDPOINT PRINCIPAL: /activate (a extensão usa este)
-// ============================================================================
-
 app.post('/activate', (req, res) => {
-  const { installId, licenseKey, clientTag, language, buildDigest } = req.body;
+  const { installId, licenseKey } = req.body;
+  if (!installId) return res.status(400).json({ erro: 'installId é obrigatório' });
 
-  if (!installId) {
-    return res.status(400).json({ erro: 'installId é obrigatório' });
-  }
-
-  // Se uma chave foi fornecida, valida
   if (licenseKey) {
     const lic = licenses.get(licenseKey);
-    if (!lic) {
-      return res.status(404).json({ erro: 'Chave de licença inválida' });
-    }
-    if (!lic.active) {
-      return res.status(403).json({ erro: 'Licença revogada' });
-    }
+    if (!lic) return res.status(404).json({ erro: 'Chave de licença inválida' });
+    if (!lic.active) return res.status(403).json({ erro: 'Licença revogada' });
     const expDate = lic.createdAt + lic.days * 24 * 60 * 60 * 1000;
-    if (Date.now() > expDate) {
-      return res.status(403).json({ erro: 'Licença expirada' });
-    }
+    if (Date.now() > expDate) return res.status(403).json({ erro: 'Licença expirada' });
+
     const token = generateLicenseToken(installId, lic.plan, lic.days);
     return res.json({
       token,
@@ -101,13 +85,9 @@ app.post('/activate', (req, res) => {
     });
   }
 
-  // Sem chave: gera uma nova (para testes)
   const newKey = generateLicenseKey();
   const token = generateLicenseToken(installId, 'premium', 30);
-  licenses.set(newKey, {
-    installId, plan: 'premium', days: 30,
-    createdAt: Date.now(), active: true, token
-  });
+  licenses.set(newKey, { installId, plan: 'premium', days: 30, createdAt: Date.now(), active: true, token });
   res.json({
     token,
     licenseKey: newKey,
@@ -119,9 +99,8 @@ app.post('/activate', (req, res) => {
   });
 });
 
-// Compatibilidade com o endpoint antigo
 app.post('/gerar-licenca', (req, res) => {
-  const { userId, installId, licenseKey, days } = req.body;
+  const { userId, installId, days } = req.body;
   const id = installId || userId;
   if (!id) return res.status(400).json({ erro: 'installId ou userId é obrigatório' });
   const duration = days || 30;
@@ -130,10 +109,6 @@ app.post('/gerar-licenca', (req, res) => {
   licenses.set(newKey, { installId: id, plan: 'premium', days: duration, createdAt: Date.now(), active: true, token });
   res.json({ token, licenseKey: newKey, secret: 'segredo-' + id, status: 'active', plan: 'premium', days: duration });
 });
-
-// ============================================================================
-// WEBHOOK DO TELEGRAM
-// ============================================================================
 
 app.post('/telegram-webhook', async (req, res) => {
   const update = req.body;
