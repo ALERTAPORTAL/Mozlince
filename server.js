@@ -19,8 +19,11 @@ const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 async function redisSet(key, value) {
   const res = await fetch(`${UPSTASH_URL}/set/${key}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-    body: JSON.stringify(value)
+    headers: { 
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: value
   });
   return res.json();
 }
@@ -31,12 +34,6 @@ async function redisGet(key) {
   });
   const data = await res.json();
   return data.result ? JSON.parse(data.result) : null;
-}
-
-async function redisDel(key) {
-  await fetch(`${UPSTASH_URL}/del/${key}`, {
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
-  });
 }
 
 async function redisKeys() {
@@ -156,7 +153,16 @@ app.post('/telegram-webhook', async (req, res) => {
       const parts = data.split('_');
       const days = parseInt(parts[1]);
       const licenseKey = generateLicenseKey();
-      await redisSet(licenseKey, JSON.stringify({ plan: 'premium', days, createdAt: Date.now(), active: true, installId: null }));
+      
+      // Salva a chave com TODOS os campos
+      await redisSet(licenseKey, JSON.stringify({ 
+        plan: 'premium', 
+        days: days, 
+        createdAt: Date.now(), 
+        active: true, 
+        installId: null 
+      }));
+      
       await answerCallbackQuery(cb.id, `Licença gerada!`);
       await sendTelegramMessage(chatId,
         `✅ *Licença gerada!*\n\n` +
@@ -202,9 +208,10 @@ app.post('/telegram-webhook', async (req, res) => {
       const lic = await redisGet(key);
       if (lic) {
         const expDate = new Date(lic.createdAt + lic.days * 24 * 60 * 60 * 1000);
+        const expFormatted = expDate.toLocaleString('pt-BR');
         await sendTelegramMessage(chatId,
           `📋 *Status*\n*Chave:* \`${key}\`\n*Install ID:* \`${lic.installId || 'não vinculado'}\`\n` +
-          `*Duração:* ${lic.days === 3650 ? 'Ilimitada' : lic.days + ' dias'}\n*Expira:* ${expDate.toLocaleString()}\n*Ativa:* ${lic.active ? 'Sim' : 'Não'}`
+          `*Duração:* ${lic.days === 3650 ? 'Ilimitada' : lic.days + ' dias'}\n*Expira:* ${expFormatted}\n*Ativa:* ${lic.active ? 'Sim' : 'Não'}`
         );
       } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${key}\`.`); }
     } else if (command === '/revogar') {
@@ -223,7 +230,10 @@ app.post('/telegram-webhook', async (req, res) => {
         let msg = `📋 *Licenças (${keys.length})*\n\n`;
         for (const key of keys) {
           const lic = await redisGet(key);
-          if (lic) msg += `• \`${key}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'} - ${lic.active ? 'Ativa' : 'Revogada'}\n`;
+          if (lic) {
+            const expDate = new Date(lic.createdAt + lic.days * 24 * 60 * 60 * 1000);
+            msg += `• \`${key}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'} - ${lic.active ? 'Ativa' : 'Revogada'} - Expira: ${expDate.toLocaleDateString('pt-BR')}\n`;
+          }
         }
         await sendTelegramMessage(chatId, msg);
       }
