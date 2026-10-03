@@ -292,12 +292,5 @@ app.post('/verificar-licenca', (req, res) => {
 });
 
 
-// Alias: extensão chama /v1/activate -> redireciona para /activate
-app.post('/v1/activate', (req, res, next) => {
-  req.url = '/activate';
-  req.method = 'POST';
-  app._router.handle(req, res, next);
-});
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log(`Servidor rodando na porta ${PORT}`); });
