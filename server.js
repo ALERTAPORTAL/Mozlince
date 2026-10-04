@@ -21,9 +21,9 @@ const PRICES = {
 };
 
 function loadKeyFromFile(filePath, envVal, label) {
-  if (fs.existsSync(filePath)) { try { const c = fs.readFileSync(filePath, 'utf8'); console.log('OK ' + label); return c; } catch (e) { console.error(e.message); } }
+  if (fs.existsSync(filePath)) { try { return fs.readFileSync(filePath, 'utf8'); } catch (e) {} }
   if (envVal) { let v = envVal.trim(); if (!v.includes('BEGIN')) { try { v = Buffer.from(v, 'base64').toString('utf8'); } catch (e) {} } else { v = v.replace(/\\n/g, '\n'); } return v; }
-  console.error('MISSING ' + label); return null;
+  return null;
 }
 
 const privateKey = loadKeyFromFile('/etc/secrets/private.pem', process.env.EC_PRIVATE_KEY, 'EC_PRIVATE_KEY');
@@ -83,6 +83,59 @@ function generateLicenseToken(installId, plan, days) {
 }
 
 // ============================================================
+//  MENUS
+// ============================================================
+function buildAdminMenu() {
+  return `╔══════════════════════════════╗\n` +
+    `║   👑 *PAINEL ADMIN*            ║\n` +
+    `║      Mozlince License         ║\n` +
+    `╚══════════════════════════════╝\n\n` +
+    `👋 Bem-vindo, Boss!\n\n` +
+    `📊 Total de licenças e estatísticas disponíveis\n` +
+    `nos botões abaixo.\n\n` +
+    `_Selecione uma ação:_`;
+}
+
+const ADMIN_KEYBOARD = {
+  inline_keyboard: [
+    [{ text: '🎫 Gerar Licença', callback_data: 'menu_gerar' }, { text: '📋 Listar', callback_data: 'menu_listar' }],
+    [{ text: '📊 Estatísticas', callback_data: 'menu_stats' }, { text: '🚨 Avisos', callback_data: 'menu_avisos' }],
+    [{ text: '🎟️ Cupons', callback_data: 'menu_cupons' }, { text: '📢 Broadcast', callback_data: 'menu_broadcast' }],
+    [{ text: '📦 Backup', callback_data: 'menu_backup' }, { text: '📜 Logs', callback_data: 'menu_logs' }],
+    [{ text: '⚙️ Ajuda', callback_data: 'menu_help' }]
+  ]
+};
+
+function buildAdminHelp() {
+  return `📚 *COMANDOS COMPLETOS*\n\n` +
+    `🎫 *LICENÇAS*\n` +
+    `/gerar — Tabela + gerar\n` +
+    `/trial — Trial grátis 7d\n` +
+    `/activate <id> <chave>\n` +
+    `/desvincular <chave>\n` +
+    `/reset <chave>\n` +
+    `/status <chave>\n` +
+    `/info <chave>\n` +
+    `/revogar <chave>\n` +
+    `/listar\n` +
+    `/excluir <chave>\n` +
+    `/excluirtudo\n\n` +
+    `🎟️ *CUPONS*\n` +
+    `/cupom_pct <código> <%> [max]\n` +
+    `/cupom_fix <código> <R$> [max]\n` +
+    `/cupons\n` +
+    `/cupom_del <código>\n` +
+    `/usar_cupom <código> <plano>\n\n` +
+    `📢 *GESTÃO*\n` +
+    `/broadcast <msg>\n` +
+    `/estatisticas\n` +
+    `/avisos\n` +
+    `/logs\n` +
+    `/backup\n\n` +
+    `🔗 Dashboard: /dashboard`;
+}
+
+// ============================================================
 //  HTTP
 // ============================================================
 app.get('/', (req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -117,7 +170,7 @@ app.get('/dashboard', async (req, res) => {
 });
 
 // ============================================================
-//  WEBHOOK ÚNICO — Detecta admin vs cliente
+//  WEBHOOK
 // ============================================================
 app.post('/telegram-webhook', async (req, res) => {
   const update = req.body;
@@ -127,54 +180,62 @@ app.post('/telegram-webhook', async (req, res) => {
   try {
     if (!chatId) return res.sendStatus(200);
 
-    // ========== ADMIN ==========
-    if (isAdmin) {
-      // CALLBACKS ADMIN
-      if (update.callback_query) {
-        const cb = update.callback_query;
-        const data = cb.data;
+    // ========== ADMIN — CALLBACKS ==========
+    if (isAdmin && update.callback_query) {
+      const cb = update.callback_query;
+      const data = cb.data;
 
-        if (data.startsWith('buy_')) {
-          const plan = PRICES[data.slice(4)];
-          if (!plan) { await tgAnswer(cb.id, '❌'); return res.sendStatus(200); }
-          const key = generateLicenseKey();
-          await redisSet(key, { plan: 'premium', days: plan.dias, price: plan.preco, originalPrice: plan.preco, label: plan.label, createdAt: Date.now(), active: true, installId: null });
-          await redisPush('ASHEO_SALES', { key, plano: plan.label, preco: plan.preco, at: Date.now() });
-          await tgAnswer(cb.id, `✅ ${plan.label}!`);
-          await tgSend(chatId, `🔔 *NOVA LICENÇA*\n\n🔑 \`${key}\`\n📦 ${plan.label}\n💰 R$ ${plan.preco.toFixed(2)}\n📅 ${plan.dias === 3650 ? 'Nunca' : fmtDate(Date.now() + plan.dias * 86400000)}`);
-        }
-        if (data.startsWith('info_')) { const key = data.slice(5); const l = await redisGet(key); if (!l) { await tgAnswer(cb.id, '❌'); return res.sendStatus(200); } const d = diasRestantes(l); await tgAnswer(cb.id, '📋'); await tgSend(chatId, `📋 *DETALHES*\n\n🔑 \`${key}\`\n${statusEmoji(l)} ${statusTexto(l)}\n👤 \`${l.installId || 'livre'}\`\n📦 ${l.label || l.days + 'd'}\n💰 R$ ${(l.price || 0).toFixed(2)}\n📅 ${fmtDate(l.createdAt)}\n⏰ ${l.days === 3650 ? 'Nunca' : fmtDate(expiraEm(l))}`, { inline_keyboard: [[{ text: '🔓 Desvincular', callback_data: 'unbind_' + key }, { text: '♻️ Resetar', callback_data: 'reset_' + key }], [{ text: '🗑️ Excluir', callback_data: 'del_' + key }]] }); }
-        if (data.startsWith('unbind_')) { const k = data.slice(7); const l = await redisGet(k); if (l) { l.installId = null; await redisSet(k, l); await tgAnswer(cb.id, '🔓'); await tgSend(chatId, `🔓 \`${k}\` desvinculada.`); } }
-        if (data.startsWith('reset_')) { const k = data.slice(6); const l = await redisGet(k); if (l) { l.installId = null; l.active = true; l.createdAt = Date.now(); await redisSet(k, l); await tgAnswer(cb.id, '♻️'); await tgSend(chatId, `♻️ \`${k}\` resetada.`); } }
-        if (data.startsWith('del_')) { const k = data.slice(4); await redisDel(k); await tgAnswer(cb.id, '🗑️'); await tgSend(chatId, `🗑️ \`${k}\` excluída.`); }
-        if (data === 'delall_confirm') { const ks = await redisKeys(); for (const k of ks) await redisDel(k); await tgAnswer(cb.id, `🗑️ ${ks.length}`); await tgSend(chatId, `🗑️ *${ks.length} licenças* excluídas.`); }
-        if (data === 'broadcast_confirm') { const p = await redisGet('ASHEO_BROADCAST_PENDING'); if (p) { await redisDel('ASHEO_BROADCAST_PENDING'); await tgAnswer(cb.id, '📢'); await tgSend(chatId, `📢 Broadcast: "${p.text}"`); } }
-        if (data === 'menu' || data === 'back') { await tgAnswer(cb.id, '🏠'); await tgSend(chatId, buildAdminMenu()); }
-        return res.sendStatus(200);
-      }
+      if (data === 'menu' || data === 'back') { await tgAnswer(cb.id, '🏠'); await tgSend(chatId, buildAdminMenu(), ADMIN_KEYBOARD); }
+      if (data === 'menu_gerar') { await tgAnswer(cb.id, '💰'); await tgSend(chatId, '💰 *TABELA DE PREÇOS*\n\nEscolha um plano:', { inline_keyboard: [[{ text: '3 Dias — R$ 2,99', callback_data: 'buy_3d' }, { text: '7 Dias — R$ 4,99', callback_data: 'buy_7d' }], [{ text: '15 Dias — R$ 7,99', callback_data: 'buy_15d' }, { text: '30 Dias — R$ 12,99', callback_data: 'buy_30d' }], [{ text: '90 Dias — R$ 29,99', callback_data: 'buy_90d' }, { text: '1 Ano — R$ 79,99', callback_data: 'buy_365d' }], [{ text: '💎 ILIMITADO — R$ 149,99', callback_data: 'buy_ltd' }], [{ text: '🔙 Voltar', callback_data: 'menu' }]] }); }
+      if (data === 'menu_listar') { await tgAnswer(cb.id, '📋'); const ks = await redisKeys(); if (!ks.length) { await tgSend(chatId, '📭 *Nenhuma licença.*'); return res.sendStatus(200); } let m = `📋 *LICENÇAS* (${ks.length})\n\n`; for (const k of ks.slice(-30)) { const l = await redisGet(k); if (l) m += `${statusEmoji(l)} \`${k}\` — ${l.label || l.days + 'd'} — ${l.installId ? '👤' : '🔓'}\n`; } await tgSend(chatId, m, { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data === 'menu_stats') { await tgAnswer(cb.id, '📊'); const ks = await redisKeys(); let a = 0, ex = 0, rv = 0, rec = 0, vin = 0; for (const k of ks) { const l = await redisGet(k); if (!l) continue; if (!l.active) rv++; else if (isExpired(l)) ex++; else a++; if (l.installId) vin++; rec += l.price || 0; } await tgSend(chatId, `📊 *ESTATÍSTICAS*\n\n📦 Total: *${ks.length}*\n🟢 Ativas: *${a}*\n⏰ Expiradas: *${ex}*\n🔴 Revogadas: *${rv}*\n👤 Vinculadas: *${vin}*\n💰 Receita: *R$ ${rec.toFixed(2)}*`, { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data === 'menu_avisos') { await tgAnswer(cb.id, '🚨'); const ks = await redisKeys(); let c = []; for (const k of ks) { const l = await redisGet(k); if (!l || !l.active || isExpired(l) || l.days === 3650) continue; const d = diasRestantes(l); if (d <= 7) c.push({ k, d }); } c.sort((a, b) => a.d - b.d); let m = `🚨 *AVISOS DE EXPIRAÇÃO*\n\n`; if (!c.length) m += '✅ Nenhuma licença expirando nos próximos 7 dias.'; else for (const x of c) m += `⚠️ \`${x.k}\` — *${x.d}d*\n`; await tgSend(chatId, m, { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data === 'menu_cupons') { await tgAnswer(cb.id, '🎟️'); const cp = await redisGet('ASHEO_COUPONS') || {}; const ks = Object.keys(cp); let m = `🎟️ *CUPONS* (${ks.length})\n\n`; if (!ks.length) m += '_Nenhum cupom cadastrado._\n\nUse:\n`/cupom_pct <código> <%>`\n`/cupom_fix <código> <R$>`'; else for (const c of ks) { const x = cp[c]; m += `*${c}* — ${x.tipo === 'percent' ? x.valor + '%' : 'R$ ' + x.valor.toFixed(2)} — ${x.usos || 0}/${x.maxUsos || '∞'}\n`; } await tgSend(chatId, m, { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data === 'menu_broadcast') { await tgAnswer(cb.id, '📢'); await tgSend(chatId, `📢 *BROADCAST*\n\nUse:\n\`/broadcast <mensagem>\`\n\nExemplo:\n\`/broadcast Promoção de 50% em todos os planos!\``, { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data === 'menu_backup') { await tgAnswer(cb.id, '📦'); const ks = await redisKeys(); const d = {}; for (const k of ks) d[k] = await redisGet(k); const json = JSON.stringify(d, null, 2); try { const fd = new FormData(); fd.append('chat_id', chatId); fd.append('caption', `📦 Backup — ${fmtDate(Date.now())}`); fd.append('document', new Blob([json], { type: 'application/json' }), `backup-${Date.now()}.json`); await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument`, { method: 'POST', body: fd }); } catch (e) { await tgSend(chatId, '❌ Erro ao gerar backup.'); } }
+      if (data === 'menu_logs') { await tgAnswer(cb.id, '📜'); const lg = await redisGet('ASHEO_LOG') || []; let m = `📜 *LOGS* (${lg.length})\n\n`; if (!lg.length) m += '_Nenhum log._'; else for (const x of lg.slice(-15).reverse()) m += `• \`${x.acao}\` — ${fmtDate(x.at)}\n`; await tgSend(chatId, m, { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data === 'menu_help') { await tgAnswer(cb.id, '⚙️'); await tgSend(chatId, buildAdminHelp(), { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
 
-      // COMANDOS ADMIN
-      if (!update.message?.text) return res.sendStatus(200);
+      // Ações de licença
+      if (data.startsWith('buy_')) { const plan = PRICES[data.slice(4)]; if (!plan) { await tgAnswer(cb.id, '❌'); return res.sendStatus(200); } const key = generateLicenseKey(); await redisSet(key, { plan: 'premium', days: plan.dias, price: plan.preco, originalPrice: plan.preco, label: plan.label, createdAt: Date.now(), active: true, installId: null }); await redisPush('ASHEO_SALES', { key, plano: plan.label, preco: plan.preco, at: Date.now() }); await tgAnswer(cb.id, `✅ ${plan.label}!`); await tgSend(chatId, `🔔 *NOVA LICENÇA*\n\n🔑 \`${key}\`\n📦 ${plan.label}\n💰 R$ ${plan.preco.toFixed(2)}\n📅 ${plan.dias === 3650 ? 'Nunca' : fmtDate(Date.now() + plan.dias * 86400000)}`, { inline_keyboard: [[{ text: '📋 Detalhes', callback_data: 'info_' + key }], [{ text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data.startsWith('info_')) { const key = data.slice(5); const l = await redisGet(key); if (!l) { await tgAnswer(cb.id, '❌'); return res.sendStatus(200); } const d = diasRestantes(l); await tgAnswer(cb.id, '📋'); await tgSend(chatId, `📋 *DETALHES*\n\n🔑 \`${key}\`\n${statusEmoji(l)} ${statusTexto(l)}\n👤 \`${l.installId || 'livre'}\`\n📦 ${l.label || l.days + 'd'}\n💰 R$ ${(l.price || 0).toFixed(2)}\n📅 ${fmtDate(l.createdAt)}\n⏰ ${l.days === 3650 ? 'Nunca' : fmtDate(expiraEm(l))}\n${l.days !== 3650 ? '⏳ ' + (d > 0 ? d + 'd' : 'Expirada') : ''}`, { inline_keyboard: [[{ text: '🔓 Desvincular', callback_data: 'unbind_' + key }, { text: '♻️ Resetar', callback_data: 'reset_' + key }], [{ text: '🗑️ Excluir', callback_data: 'del_' + key }, { text: '🔙 Menu', callback_data: 'menu' }]] }); }
+      if (data.startsWith('unbind_')) { const k = data.slice(7); const l = await redisGet(k); if (l) { l.installId = null; await redisSet(k, l); await tgAnswer(cb.id, '🔓'); await tgSend(chatId, `🔓 \`${k}\` desvinculada.`); } }
+      if (data.startsWith('reset_')) { const k = data.slice(6); const l = await redisGet(k); if (l) { l.installId = null; l.active = true; l.createdAt = Date.now(); await redisSet(k, l); await tgAnswer(cb.id, '♻️'); await tgSend(chatId, `♻️ \`${k}\` resetada.`); } }
+      if (data.startsWith('del_')) { const k = data.slice(4); await redisDel(k); await tgAnswer(cb.id, '🗑️'); await tgSend(chatId, `🗑️ \`${k}\` excluída.`); }
+      if (data === 'delall_confirm') { const ks = await redisKeys(); for (const k of ks) await redisDel(k); await tgAnswer(cb.id, `🗑️ ${ks.length}`); await tgSend(chatId, `🗑️ *${ks.length} licenças* excluídas.`); }
+      if (data === 'broadcast_confirm') { const p = await redisGet('ASHEO_BROADCAST_PENDING'); if (p) { await redisDel('ASHEO_BROADCAST_PENDING'); await tgAnswer(cb.id, '📢'); await tgSend(chatId, `📢 Broadcast enviado: "${p.text}"`); } }
+
+      return res.sendStatus(200);
+    }
+
+    // ========== ADMIN — COMANDOS ==========
+    if (isAdmin && update.message?.text) {
       const args = update.message.text.trim().replace(/\n/g, ' ').split(' ').filter(a => a.length > 0);
       const cmd = args[0].toLowerCase();
 
-      if (cmd === '/start') await tgSend(chatId, buildAdminMenu());
-      else if (cmd === '/gerar') await tgSend(chatId, '💰 *TABELA DE PREÇOS*\n\nEscolha:', { inline_keyboard: [[{ text: '3 Dias — R$ 2,99', callback_data: 'buy_3d' }, { text: '7 Dias — R$ 4,99', callback_data: 'buy_7d' }], [{ text: '15 Dias — R$ 7,99', callback_data: 'buy_15d' }, { text: '30 Dias — R$ 12,99', callback_data: 'buy_30d' }], [{ text: '90 Dias — R$ 29,99', callback_data: 'buy_90d' }, { text: '1 Ano — R$ 79,99', callback_data: 'buy_365d' }], [{ text: '💎 ILIMITADO — R$ 149,99', callback_data: 'buy_ltd' }]] });
-      else if (cmd === '/trial') { const k = generateLicenseKey(); await redisSet(k, { plan: 'premium', days: 7, price: 0, label: 'Trial 7 Dias', createdAt: Date.now(), active: true, installId: null, trial: true }); await tgSend(chatId, `🎁 Trial: \`${k}\``); }
+      if (cmd === '/start') await tgSend(chatId, buildAdminMenu(), ADMIN_KEYBOARD);
+      else if (cmd === '/gerar') await tgSend(chatId, '💰 *TABELA DE PREÇOS*\n\nEscolha:', { inline_keyboard: [[{ text: '3 Dias — R$ 2,99', callback_data: 'buy_3d' }, { text: '7 Dias — R$ 4,99', callback_data: 'buy_7d' }], [{ text: '15 Dias — R$ 7,99', callback_data: 'buy_15d' }, { text: '30 Dias — R$ 12,99', callback_data: 'buy_30d' }], [{ text: '90 Dias — R$ 29,99', callback_data: 'buy_90d' }, { text: '1 Ano — R$ 79,99', callback_data: 'buy_365d' }], [{ text: '💎 ILIMITADO — R$ 149,99', callback_data: 'buy_ltd' }], [{ text: '🔙 Menu', callback_data: 'menu' }]] });
+      else if (cmd === '/trial') { const k = generateLicenseKey(); await redisSet(k, { plan: 'premium', days: 7, price: 0, label: 'Trial 7 Dias', createdAt: Date.now(), active: true, installId: null, trial: true }); await tgSend(chatId, `🎁 *Trial 7 dias:* \`${k}\``); }
       else if (cmd === '/activate') { const k = args[args.length - 1], id = args.slice(1, args.length - 1).join(' '); if (!id || !k) { await tgSend(chatId, '⚠️ /activate <id> <chave>'); return res.sendStatus(200); } const l = await redisGet(k); if (!l) { await tgSend(chatId, '❌ Não encontrada.'); return res.sendStatus(200); } if (l.installId) { await tgSend(chatId, '⚠️ Já vinculada.'); return res.sendStatus(200); } l.installId = id; await redisSet(k, l); await tgSend(chatId, `✅ \`${k}\` → \`${id}\``); }
       else if (cmd === '/desvincular') { const k = args[1]; if (!k) { await tgSend(chatId, '⚠️ /desvincular <chave>'); return res.sendStatus(200); } const l = await redisGet(k); if (!l) { await tgSend(chatId, '❌ Não encontrada.'); return res.sendStatus(200); } l.installId = null; await redisSet(k, l); await tgSend(chatId, `🔓 \`${k}\` desvinculada.`); }
       else if (cmd === '/reset') { const k = args[1]; if (!k) { await tgSend(chatId, '⚠️ /reset <chave>'); return res.sendStatus(200); } const l = await redisGet(k); if (!l) { await tgSend(chatId, '❌ Não encontrada.'); return res.sendStatus(200); } l.installId = null; l.active = true; l.createdAt = Date.now(); await redisSet(k, l); await tgSend(chatId, `♻️ \`${k}\` resetada.`); }
-      else if (cmd === '/status' || cmd === '/info') { const k = args[1]; if (!k) { await tgSend(chatId, '⚠️ /status <chave>'); return res.sendStatus(200); } const l = await redisGet(k); if (!l) { await tgSend(chatId, '❌ Não encontrada.'); return res.sendStatus(200); } const d = diasRestantes(l); await tgSend(chatId, `📋 \`${k}\`\n${statusEmoji(l)} ${statusTexto(l)}\n👤 \`${l.installId || 'livre'}\`\n📦 ${l.label || l.days + 'd'}\n📅 ${fmtDate(l.createdAt)}\n⏰ ${l.days === 3650 ? 'Nunca' : fmtDate(expiraEm(l))}\n⏳ ${d > 0 ? d + ' dias' : 'Expirada'}`); }
+      else if (cmd === '/status' || cmd === '/info') { const k = args[1]; if (!k) { await tgSend(chatId, '⚠️ /status <chave>'); return res.sendStatus(200); } const l = await redisGet(k); if (!l) { await tgSend(chatId, '❌ Não encontrada.'); return res.sendStatus(200); } const d = diasRestantes(l); await tgSend(chatId, `📋 \`${k}\`\n${statusEmoji(l)} ${statusTexto(l)}\n👤 \`${l.installId || 'livre'}\`\n📦 ${l.label || l.days + 'd'}\n💰 R$ ${(l.price || 0).toFixed(2)}\n📅 ${fmtDate(l.createdAt)}\n⏰ ${l.days === 3650 ? 'Nunca' : fmtDate(expiraEm(l))}\n${l.days !== 3650 ? '⏳ ' + (d > 0 ? d + 'd' : 'Expirada') : ''}`); }
       else if (cmd === '/revogar') { const k = args[1]; if (!k) { await tgSend(chatId, '⚠️ /revogar <chave>'); return res.sendStatus(200); } const l = await redisGet(k); if (!l) { await tgSend(chatId, '❌'); return res.sendStatus(200); } l.active = false; await redisSet(k, l); await tgSend(chatId, `🔴 \`${k}\` revogada.`); }
       else if (cmd === '/listar') { const ks = await redisKeys(); if (!ks.length) { await tgSend(chatId, '📭 Nenhuma.'); return res.sendStatus(200); } let msg = `📋 *LICENÇAS* (${ks.length})\n\n`; for (const k of ks.slice(-30)) { const l = await redisGet(k); if (l) msg += `${statusEmoji(l)} \`${k}\` — ${l.label || l.days + 'd'} — ${l.installId ? '👤' : '🔓'}\n`; } await tgSend(chatId, msg); }
-      else if (cmd === '/excluir') { const k = args[1]; if (!k) { await tgSend(chatId, '⚠️'); return res.sendStatus(200); } await redisDel(k); await tgSend(chatId, `🗑️ \`${k}\` excluída.`); }
-      else if (cmd === '/excluirtudo') { const ks = await redisKeys(); await tgSend(chatId, `🚨 Excluir *${ks.length}*?`, { inline_keyboard: [[{ text: '⚠️ SIM', callback_data: 'delall_confirm' }, { text: '❌ Não', callback_data: 'back' }]] }); }
+      else if (cmd === '/excluir') { const k = args[1]; if (!k) { await tgSend(chatId, '⚠️ /excluir <chave>'); return res.sendStatus(200); } await redisDel(k); await tgSend(chatId, `🗑️ \`${k}\` excluída.`); }
+      else if (cmd === '/excluirtudo') { const ks = await redisKeys(); await tgSend(chatId, `🚨 Excluir *${ks.length}* licenças?`, { inline_keyboard: [[{ text: '⚠️ SIM', callback_data: 'delall_confirm' }, { text: '❌ Não', callback_data: 'menu' }]] }); }
       else if (cmd === '/estatisticas' || cmd === '/stats') { const ks = await redisKeys(); let a = 0, ex = 0, rv = 0, rec = 0; for (const k of ks) { const l = await redisGet(k); if (!l) continue; if (!l.active) rv++; else if (isExpired(l)) ex++; else a++; rec += l.price || 0; } await tgSend(chatId, `📊 *STATS*\n\n📦 ${ks.length}\n🟢 ${a}\n⏰ ${ex}\n🔴 ${rv}\n💰 R$ ${rec.toFixed(2)}`); }
       else if (cmd === '/avisos') { const ks = await redisKeys(); let c = []; for (const k of ks) { const l = await redisGet(k); if (!l || !l.active || isExpired(l) || l.days === 3650) continue; const d = diasRestantes(l); if (d <= 7) c.push({ k, d }); } c.sort((a, b) => a.d - b.d); let msg = `🚨 *AVISOS*\n\n`; if (!c.length) msg += '✅ Nenhuma.'; else for (const x of c) msg += `⚠️ \`${x.k}\` — ${x.d}d\n`; await tgSend(chatId, msg); }
-      else if (cmd === '/broadcast') { const t = args.slice(1).join(' '); if (!t) { await tgSend(chatId, '⚠️ /broadcast <msg>'); return res.sendStatus(200); } await redisSet('ASHEO_BROADCAST_PENDING', { text: t }); await tgSend(chatId, `📢 Broadcast: "${t}"`, { inline_keyboard: [[{ text: '✅ Enviar', callback_data: 'broadcast_confirm' }, { text: '❌', callback_data: 'back' }]] }); }
+      else if (cmd === '/cupom_pct') { const [, code, val, mx] = args; if (!code || !val) { await tgSend(chatId, '⚠️ /cupom_pct <código> <%> [max]'); return res.sendStatus(200); } const cp = await redisGet('ASHEO_COUPONS') || {}; cp[code.toUpperCase()] = { tipo: 'percent', valor: parseFloat(val), maxUsos: mx ? parseInt(mx) : null, usos: 0, createdAt: Date.now() }; await redisSet('ASHEO_COUPONS', cp); await tgSend(chatId, `✅ Cupom *${code.toUpperCase()}* = ${val}% off`); }
+      else if (cmd === '/cupom_fix') { const [, code, val, mx] = args; if (!code || !val) { await tgSend(chatId, '⚠️ /cupom_fix <código> <R$> [max]'); return res.sendStatus(200); } const cp = await redisGet('ASHEO_COUPONS') || {}; cp[code.toUpperCase()] = { tipo: 'fixed', valor: parseFloat(val), maxUsos: mx ? parseInt(mx) : null, usos: 0, createdAt: Date.now() }; await redisSet('ASHEO_COUPONS', cp); await tgSend(chatId, `✅ Cupom *${code.toUpperCase()}* = R$ ${parseFloat(val).toFixed(2)} off`); }
+      else if (cmd === '/cupons') { const cp = await redisGet('ASHEO_COUPONS') || {}; const ks = Object.keys(cp); let m = `🎟️ *CUPONS* (${ks.length})\n\n`; if (!ks.length) m += '_Nenhum._'; else for (const c of ks) { const x = cp[c]; m += `*${c}* — ${x.tipo === 'percent' ? x.valor + '%' : 'R$ ' + x.valor.toFixed(2)} — ${x.usos || 0}/${x.maxUsos || '∞'}\n`; } await tgSend(chatId, m); }
+      else if (cmd === '/cupom_del') { const code = args[1]?.toUpperCase(); if (!code) { await tgSend(chatId, '⚠️ /cupom_del <código>'); return res.sendStatus(200); } const cp = await redisGet('ASHEO_COUPONS') || {}; delete cp[code]; await redisSet('ASHEO_COUPONS', cp); await tgSend(chatId, `🗑️ Cupom *${code}* excluído.`); }
+      else if (cmd === '/broadcast') { const t = args.slice(1).join(' '); if (!t) { await tgSend(chatId, '⚠️ /broadcast <msg>'); return res.sendStatus(200); } await redisSet('ASHEO_BROADCAST_PENDING', { text: t }); await tgSend(chatId, `📢 Broadcast: "${t}"`, { inline_keyboard: [[{ text: '✅ Enviar', callback_data: 'broadcast_confirm' }, { text: '❌', callback_data: 'menu' }]] }); }
       else if (cmd === '/logs') { const lg = await redisGet('ASHEO_LOG') || []; let msg = `📜 *LOGS* (${lg.length})\n\n`; for (const x of lg.slice(-15).reverse()) msg += `• \`${x.acao}\` — ${fmtDate(x.at)}\n`; await tgSend(chatId, msg); }
-      else if (cmd === '/ajuda' || cmd === '/help') await tgSend(chatId, buildAdminHelp());
+      else if (cmd === '/backup') { const ks = await redisKeys(); const d = {}; for (const k of ks) d[k] = await redisGet(k); const json = JSON.stringify(d, null, 2); try { const fd = new FormData(); fd.append('chat_id', chatId); fd.append('document', new Blob([json], { type: 'application/json' }), `backup-${Date.now()}.json`); await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument`, { method: 'POST', body: fd }); } catch (e) { await tgSend(chatId, '❌ Erro.'); } }
+      else if (cmd === '/ajuda' || cmd === '/help') await tgSend(chatId, buildAdminHelp(), { inline_keyboard: [[{ text: '🔙 Menu', callback_data: 'menu' }]] });
       else await tgSend(chatId, '❓ Use /ajuda');
+
       return res.sendStatus(200);
     }
 
@@ -182,37 +243,31 @@ app.post('/telegram-webhook', async (req, res) => {
     if (update.callback_query) {
       const cb = update.callback_query;
       const data = cb.data;
-
       if (data === 'client_planos') {
         await tgAnswer(cb.id, '💎');
         let msg = `💎 *NOSSOS PLANOS*\n\n`;
         for (const [k, p] of Object.entries(PRICES)) msg += `⭐ *${p.label}* — R$ ${p.preco.toFixed(2)}\n`;
         const kb = { inline_keyboard: [] };
-        const entries = Object.entries(PRICES);
-        for (let i = 0; i < entries.length; i += 2) {
-          const row = [{ text: `${entries[i][1].label} — R$ ${entries[i][1].preco.toFixed(2)}`, callback_data: `client_buy_${entries[i][0]}` }];
-          if (entries[i+1]) row.push({ text: `${entries[i+1][1].label}`, callback_data: `client_buy_${entries[i+1][0]}` });
+        const e = Object.entries(PRICES);
+        for (let i = 0; i < e.length; i += 2) {
+          const row = [{ text: `${e[i][1].label} — R$ ${e[i][1].preco.toFixed(2)}`, callback_data: `client_buy_${e[i][0]}` }];
+          if (e[i+1]) row.push({ text: `${e[i+1][1].label}`, callback_data: `client_buy_${e[i+1][0]}` });
           kb.inline_keyboard.push(row);
         }
         kb.inline_keyboard.push([{ text: '🔙 Voltar', callback_data: 'client_menu' }]);
         await tgSend(chatId, msg, kb);
       }
-
       if (data.startsWith('client_buy_')) {
-        const planKey = data.slice(11);
-        const plan = PRICES[planKey];
+        const plan = PRICES[data.slice(11)];
         if (!plan) { await tgAnswer(cb.id, '❌'); return res.sendStatus(200); }
         const orderId = 'ORD-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-        const order = { orderId, telegramId: chatId, nome: cb.from?.first_name || 'Cliente', username: cb.from?.username || null, plano: planKey, planoLabel: plan.label, preco: plan.preco, dias: plan.dias, at: Date.now(), status: 'pending' };
-        const orders = await redisGet('ASHEO_ORDERS') || [];
-        orders.push(order);
-        await redisSet('ASHEO_ORDERS', orders);
+        const order = { orderId, telegramId: chatId, nome: cb.from?.first_name || 'Cliente', username: cb.from?.username || null, plano: data.slice(11), planoLabel: plan.label, preco: plan.preco, dias: plan.dias, at: Date.now(), status: 'pending' };
+        const os = await redisGet('ASHEO_ORDERS') || []; os.push(order); await redisSet('ASHEO_ORDERS', os);
         await tgAnswer(cb.id, '✅');
         await tgSend(OWNER_ID, `🔔 *NOVO PEDIDO*\n\n🆔 \`${orderId}\`\n👤 ${order.nome}\n📱 ${order.username ? '@' + order.username : 'sem @'}\n🆔 \`${chatId}\`\n📦 ${plan.label}\n💰 R$ ${plan.preco.toFixed(2)}`);
         await tgSend(chatId, `✅ *Pedido ${orderId}*\n\n📦 ${plan.label}\n💰 R$ ${plan.preco.toFixed(2)}\n\n💳 *PIX:* \`pagamentos@mozlince.com\`\n\nEnvie o comprovante aqui.`, { inline_keyboard: [[{ text: '📤 Enviar Comprovante', callback_data: 'client_comprovante' }], [{ text: '💬 Suporte', callback_data: 'client_suporte' }]] });
       }
-
-      if (data === 'client_comprovante') { await tgAnswer(cb.id, '📤'); await tgSend(chatId, `📤 Envie a *foto ou PDF* do comprovante aqui.`); }
+      if (data === 'client_comprovante') { await tgAnswer(cb.id, '📤'); await tgSend(chatId, `📤 Envie a foto ou PDF do comprovante.`); }
       if (data === 'client_pedidos') { await tgAnswer(cb.id, '📋'); const os = await redisGet('ASHEO_ORDERS') || []; const meus = os.filter(o => String(o.telegramId) === String(chatId)); if (!meus.length) await tgSend(chatId, '📭 Sem pedidos.'); else { let m = `📋 *MEUS PEDIDOS*\n\n`; for (const o of meus.slice(-10).reverse()) { const st = o.status === 'pending' ? '⏳' : o.status === 'delivered' ? '✅' : '❌'; m += `${st} \`${o.orderId}\` — ${o.planoLabel}\n`; } await tgSend(chatId, m); } }
       if (data === 'client_suporte') { await tgAnswer(cb.id, '💬'); await redisSet(`ASHEO_USER_${chatId}_SUP`, { at: Date.now() }); await tgSend(chatId, `💬 *SUPORTE*\n\nDescreva sua dúvida.`); }
       if (data === 'client_menu') { await tgAnswer(cb.id, '🏠'); await tgSend(chatId, `🏠 *Menu*\n\nEscolha:`, { inline_keyboard: [[{ text: '💎 Ver Planos', callback_data: 'client_planos' }], [{ text: '🛒 Como Comprar', callback_data: 'client_comprar' }], [{ text: '💬 Suporte', callback_data: 'client_suporte' }], [{ text: '📋 Meus Pedidos', callback_data: 'client_pedidos' }]] }); }
@@ -222,29 +277,24 @@ app.post('/telegram-webhook', async (req, res) => {
 
     if (update.message?.text === '/start') {
       const firstName = update.message.from?.first_name || 'Cliente';
-      await tgSend(chatId, `╔══════════════════════════════╗\n║  👋 *BEM-VINDO(A), ${firstName}!*  ║\n╚══════════════════════════════╝\n\n🎫 *Mozlince Premium*\n\nSou o assistente virtual. Como posso ajudar?\n\n💎 Ver planos e preços\n🛒 Comprar uma licença\n💬 Falar com suporte\n📋 Consultar pedidos`, { inline_keyboard: [[{ text: '💎 Ver Planos', callback_data: 'client_planos' }], [{ text: '🛒 Como Comprar', callback_data: 'client_comprar' }], [{ text: '💬 Suporte', callback_data: 'client_suporte' }], [{ text: '📋 Meus Pedidos', callback_data: 'client_pedidos' }]] });
+      await tgSend(chatId, `╔══════════════════════════════╗\n║  👋 *BEM-VINDO(A), ${firstName}!*  ║\n╚══════════════════════════════╝\n\n🎫 *Mozlince Premium*\n\nSou o assistente virtual. Como posso ajudar?`, { inline_keyboard: [[{ text: '💎 Ver Planos', callback_data: 'client_planos' }], [{ text: '🛒 Como Comprar', callback_data: 'client_comprar' }], [{ text: '💬 Suporte', callback_data: 'client_suporte' }], [{ text: '📋 Meus Pedidos', callback_data: 'client_pedidos' }]] });
       return res.sendStatus(200);
     }
 
-    // Comprovante (foto/documento)
     if (update.message?.photo || update.message?.document) {
-      const firstName = update.message.from?.first_name || 'Cliente';
-      const username = update.message.from?.username || null;
-      const fileId = update.message.photo ? update.message.photo[update.message.photo.length - 1].file_id : update.message.document.file_id;
-      await tgSend(chatId, `✅ *Comprovante recebido!*\n\nAguarde a confirmação.`);
-      await tgSend(OWNER_ID, `📤 *COMPROVANTE*\n\n👤 ${firstName}\n📱 ${username ? '@' + username : 'sem @'}\n🆔 \`${chatId}\``);
+      await tgSend(chatId, `✅ *Comprovante recebido!*`);
+      await tgSend(OWNER_ID, `📤 *COMPROVANTE*\n\n👤 ${update.message.from?.first_name}\n🆔 \`${chatId}\``);
       return res.sendStatus(200);
     }
 
-    // Suporte (texto)
     if (update.message?.text && !update.message.text.startsWith('/')) {
       const sup = await redisGet(`ASHEO_USER_${chatId}_SUP`);
       if (sup) {
         await redisDel(`ASHEO_USER_${chatId}_SUP`);
-        await tgSend(chatId, `✅ Enviado! Em breve responderemos.`);
+        await tgSend(chatId, `✅ Enviado!`);
         await tgSend(OWNER_ID, `💬 *SUPORTE*\n\n👤 ${update.message.from?.first_name}\n🆔 \`${chatId}\`\n\n"${update.message.text}"`);
       } else {
-        await tgSend(chatId, `❓ Use /start para ver o menu.`);
+        await tgSend(chatId, `❓ Use /start.`);
       }
       return res.sendStatus(200);
     }
@@ -253,12 +303,5 @@ app.post('/telegram-webhook', async (req, res) => {
   }
   res.sendStatus(200);
 });
-
-function buildAdminMenu() {
-  return `╔══════════════════════════════╗\n║   👑 *PAINEL ADMIN*            ║\n╚══════════════════════════════╝\n\n👋 Bem-vindo!\n\n• /gerar — Tabela + gerar\n• /listar — Ver licenças\n• /estatisticas\n• /ajuda`;
-}
-function buildAdminHelp() {
-  return `📚 *COMANDOS*\n\n🎫 *LICENÇAS*\n/gerar\n/trial\n/activate <id> <chave>\n/desvincular <chave>\n/reset <chave>\n/status <chave>\n/revogar <chave>\n/listar\n/excluir <chave>\n/excluirtudo\n\n📢 *GESTÃO*\n/broadcast <msg>\n/estatisticas\n/avisos\n/logs\n\n🔗 Dashboard: /dashboard`;
-}
 
 app.listen(process.env.PORT || 3000, () => console.log('🚀 Servidor na porta ' + (process.env.PORT || 3000)));
