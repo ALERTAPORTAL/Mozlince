@@ -3,13 +3,41 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const privateKey = process.env.EC_PRIVATE_KEY.replace(/\\n/g, '\n');
-const publicKey = process.env.EC_PUBLIC_KEY.replace(/\\n/g, '\n');
+// ============================================================================
+// CARREGAR CHAVES - Tenta do ambiente, depois do arquivo /etc/secrets/
+// ============================================================================
+let privateKey, publicKey;
+
+try {
+  // Tenta carregar do ambiente primeiro
+  if (process.env.EC_PRIVATE_KEY && process.env.EC_PRIVATE_KEY.length > 100) {
+    privateKey = process.env.EC_PRIVATE_KEY.replace(/\\n/g, '\n');
+    publicKey = process.env.EC_PUBLIC_KEY.replace(/\\n/g, '\n');
+    console.log('✅ Chaves carregadas das variaveis de ambiente');
+  } else {
+    // Fallback: carrega dos arquivos de segredo do Render
+    privateKey = fs.readFileSync('/etc/secrets/private.pem', 'utf8');
+    publicKey = fs.readFileSync('/etc/secrets/public.pem', 'utf8');
+    console.log('✅ EC_PRIVATE_KEY carregada do arquivo /etc/secrets/private.pem');
+    console.log('✅ EC_PUBLIC_KEY carregada do arquivo /etc/secrets/public.pem');
+  }
+} catch (err) {
+  console.error('❌ Erro ao carregar chaves:', err.message);
+  process.exit(1);
+}
+
+console.log('======== BOOT ========');
+console.log('privateKey existe?', !!privateKey);
+console.log('✅ privateKey VALIDA');
+console.log('publicKey existe?', !!publicKey);
+console.log('======================');
+
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
