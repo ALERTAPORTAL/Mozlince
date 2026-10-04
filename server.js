@@ -201,13 +201,32 @@ async function registrarVenda(key, lic, cupomUsado) {
 //  JWT
 // ============================================================
 function generateLicenseToken(installId, plan, days) {
-  if (!privateKey) throw new Error('privateKey NÃO CARREGADA');
   const now = Math.floor(Date.now() / 1000);
   return jwt.sign({
     sub: installId, installId, status: 'active',
     plan, planDisplayName: plan === 'premium' ? 'Premium' : 'Free',
     active: true, tier: plan, kind: plan === 'premium' ? 'premium' : 'free',
-    features: { advanced_automation:true, multi_account:true, cloud_sync:true, priority_support:true, custom_export:true, api_access:true },
+    features: {
+      browser_mods: true, browserMods: true,
+      rule_ops_lab: true, ruleOpsLab: true,
+      live_injection_hud: true, liveInjectionHud: true,
+      advanced_protection: true, advancedProtection: true,
+      api_access: true, apiAccess: true,
+      experimental_features: true, experimentalFeatures: true,
+      advanced_automation: true, advancedAutomation: true,
+      multi_account: true, multiAccount: true,
+      cloud_sync: true, cloudSync: true,
+      priority_support: true, prioritySupport: true,
+      custom_export: true, customExport: true
+    },
+    capabilities: {
+      browser_mods: true, browserMods: true,
+      rule_ops_lab: true, ruleOpsLab: true,
+      live_injection_hud: true, liveInjectionHud: true,
+      advanced_protection: true, advancedProtection: true,
+      api_access: true, apiAccess: true,
+      experimental_features: true, experimentalFeatures: true
+    },
     secret: 'segredo-' + installId,
     iat: now, nbf: now - 5, exp: now + (days * 24 * 60 * 60)
   }, privateKey, { algorithm: 'ES256' });
