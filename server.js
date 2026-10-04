@@ -14,9 +14,7 @@ app.use(cors({
 app.options(/.*/, cors());
 app.use(express.json());
 
-// ==== Carrega chave de arquivo (Secret Files) ou env var ====
 function loadKeyFromFile(filePath, envVal, label) {
-  // 1) Tenta arquivo primeiro
   if (fs.existsSync(filePath)) {
     try {
       const content = fs.readFileSync(filePath, 'utf8');
@@ -26,7 +24,6 @@ function loadKeyFromFile(filePath, envVal, label) {
       console.error('⚠️ ' + label + ' erro ao ler arquivo:', e.message);
     }
   }
-  // 2) Fallback pra env var
   if (envVal) {
     let v = envVal.trim();
     if (!v.includes('BEGIN')) {
@@ -37,7 +34,7 @@ function loadKeyFromFile(filePath, envVal, label) {
     console.log('✅ ' + label + ' carregada da env var');
     return v;
   }
-  console.error('❌ ' + label + ' NÃO ENCONTRADA (arquivo nem env var)');
+  console.error('❌ ' + label + ' NÃO ENCONTRADA');
   return null;
 }
 
