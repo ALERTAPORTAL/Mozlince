@@ -29,12 +29,23 @@ const PLANOS = {
   'unli': { nome:'Ilimitado', dias:null,preco:149.99, tag:'MASTER' }
 };
 
+// ─── LÊ A CHAVE DE VÁRIOS NOMES POSSÍVEIS ───
 let PRIVATE_KEY = null;
 (function initKey() {
-  let pem = process.env.JWT_PRIVATE_KEY_PEM || '';
-  if (!pem) { log('ERRO','JWT_PRIVATE_KEY_PEM nao configurada'); return; }
+  let pem = process.env.JWT_PRIVATE_KEY_PEM
+         || process.env.EC_PRIVATE_KEY
+         || process.env.PRIVATE_KEY
+         || process.env.PRIVATE_KEY_PEM
+         || '';
+  if (!pem) {
+    log('ERRO','Nenhuma chave encontrada. Configure EC_PRIVATE_KEY ou JWT_PRIVATE_KEY_PEM');
+    return;
+  }
   try {
-    if (!pem.includes('BEGIN')) { log('SYS','Decodificando Base64...'); pem = Buffer.from(pem,'base64').toString('utf8'); }
+    if (!pem.includes('BEGIN')) {
+      log('SYS','Decodificando Base64...');
+      pem = Buffer.from(pem,'base64').toString('utf8');
+    }
     pem = pem.replace(/\\n/g,'\n').trim();
     PRIVATE_KEY = crypto.createPrivateKey(pem);
     log('OK','Chave privada ES256 carregada');
@@ -55,7 +66,7 @@ function signEntitlement(claims) {
 }
 
 app.get('/', (req, res) => {
-  res.json({ ok:true, service:'mozlince-license-api', version:'2.0-premium', status: PRIVATE_KEY?'live':'misconfigured', planos: Object.keys(PLANOS).length, uptime: Math.floor(process.uptime())+'s' });
+  res.json({ ok:true, service:'mozlince-license-api', version:'2.1-premium', status: PRIVATE_KEY?'live':'misconfigured', planos: Object.keys(PLANOS).length, uptime: Math.floor(process.uptime())+'s' });
 });
 
 app.get('/v1/planos', (req, res) => {
@@ -68,7 +79,7 @@ app.post('/v1/activate', (req, res) => {
   const { installId, licenseKey } = req.body || {};
   if (!installId) { log('WARN','Ativacao sem installId'); return res.status(400).json({ error:'missing_installId', message:'installId obrigatorio.' }); }
   if (!licenseKey || !licenseKey.startsWith('ASHEO-')) { log('WARN','Chave invalida: '+licenseKey); return res.status(401).json({ error:'invalid_license', message:'Use formato ASHEO-XXXX-XXXX-XXXX-XXXX' }); }
-  if (!PRIVATE_KEY) { log('ERRO','Servidor sem chave privada'); return res.status(500).json({ error:'server_misconfigured', message:'JWT_PRIVATE_KEY_PEM nao configurada' }); }
+  if (!PRIVATE_KEY) { log('ERRO','Servidor sem chave privada'); return res.status(500).json({ error:'server_misconfigured', message:'Configure EC_PRIVATE_KEY ou JWT_PRIVATE_KEY_PEM no Render' }); }
   try {
     const now = Math.floor(Date.now()/1000);
     const expTs = now + 3600;
@@ -104,14 +115,15 @@ app.post('/v1/verify', (req, res) => {
 });
 
 app.get('/v1/status', (req, res) => {
-  res.json({ ok:true, versao:'2.0-premium', chave_carregada: !!PRIVATE_KEY, uptime: Math.floor(process.uptime()), memoria_mb: Math.round(process.memoryUsage().rss/1024/1024), node: process.version, hora: new Date().toISOString() });
+  const varUsada = process.env.JWT_PRIVATE_KEY_PEM ? 'JWT_PRIVATE_KEY_PEM' : process.env.EC_PRIVATE_KEY ? 'EC_PRIVATE_KEY' : 'NENHUMA';
+  res.json({ ok:true, versao:'2.1-premium', chave_carregada: !!PRIVATE_KEY, variavel_chave: varUsada, uptime: Math.floor(process.uptime()), memoria_mb: Math.round(process.memoryUsage().rss/1024/1024), node: process.version, hora: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   log('SYS', 'Servidor Mozlince na porta ' + PORT);
   log('SYS', 'Planos: ' + Object.keys(PLANOS).length);
-  if (!PRIVATE_KEY) log('WARN', 'Configure JWT_PRIVATE_KEY_PEM no Render!');
+  if (!PRIVATE_KEY) log('WARN', 'Configure EC_PRIVATE_KEY ou JWT_PRIVATE_KEY_PEM no Render!');
 });
 
 process.on('uncaughtException', e => log('ERRO','Uncaught: '+e.message));
