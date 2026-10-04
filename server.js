@@ -19,7 +19,7 @@ const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 async function redisSet(key, value) {
   const res = await fetch(`${UPSTASH_URL}/set/${key}`, {
     method: 'POST',
-    headers: { 
+    headers: {
       Authorization: `Bearer ${UPSTASH_TOKEN}`,
       'Content-Type': 'application/json'
     },
@@ -74,7 +74,6 @@ async function answerCallbackQuery(callbackQueryId, text) {
   });
 }
 
-// Função que gera o token com TODOS os campos que a extensão espera
 function generateLicenseToken(installId, plan, days) {
   const payload = {
     installId: installId,
@@ -82,7 +81,6 @@ function generateLicenseToken(installId, plan, days) {
     plan: plan,
     active: true,
     tier: plan,
-    // Features (recursos avançados)
     features: {
       advanced_automation: true,
       multi_account: true,
@@ -91,13 +89,11 @@ function generateLicenseToken(installId, plan, days) {
       custom_export: true,
       api_access: true
     },
-    // Capabilities (capacidades especiais)
     capabilities: {
       bulk_actions: true,
       advanced_analytics: true,
       custom_webhooks: true
     },
-    // Limits (limites do plano)
     limits: {
       max_accounts: Infinity,
       daily_actions: Infinity,
@@ -105,7 +101,6 @@ function generateLicenseToken(installId, plan, days) {
       history_days: Infinity,
       export_limit: Infinity
     },
-    // Campos extras
     isPremium: true,
     isVerified: true,
     secret: 'segredo-' + installId,
@@ -214,15 +209,15 @@ app.post('/telegram-webhook', async (req, res) => {
       const parts = data.split('_');
       const days = parseInt(parts[1]);
       const licenseKey = generateLicenseKey();
-      
-      await redisSet(licenseKey, JSON.stringify({ 
-        plan: 'premium', 
-        days: days, 
-        createdAt: Date.now(), 
-        active: true, 
-        installId: null 
+
+      await redisSet(licenseKey, JSON.stringify({
+        plan: 'premium',
+        days: days,
+        createdAt: Date.now(),
+        active: true,
+        installId: null
       }));
-      
+
       await answerCallbackQuery(cb.id, `Licença gerada!`);
       await sendTelegramMessage(chatId,
         `✅ *Licença gerada!*\n\n` +
