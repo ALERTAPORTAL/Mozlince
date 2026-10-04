@@ -6,13 +6,14 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const app = express();
-app.use(cors({ origin: '*', methods: ['GET','POST','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','x-asheo-install','x-asheo-ts','x-asheo-sig','x-asheo-build','x-asheo-nonce'] }));
+app.use(cors({
+  origin: '*',
+  methods: ['GET','POST','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','x-asheo-install','x-asheo-ts','x-asheo-sig','x-asheo-build','x-asheo-nonce']
+}));
 app.options(/.*/, cors());
 app.use(express.json());
 
-// ============================================================
-//  CONFIG
-// ============================================================
 const PRICES = {
   '3d':   { dias: 3,    preco: 2.99,   label: '3 Dias' },
   '7d':   { dias: 7,    preco: 4.99,   label: '7 Dias' },
@@ -23,42 +24,19 @@ const PRICES = {
   'ltd':  { dias: 3650, preco: 149.99, label: 'Ilimitado' }
 };
 
-const WELCOME_TEXT = `╔══════════════════════════════╗
-║   🎫 *MOZLINCE LICENSE BOT*   ║
-║       Painel de Controle      ║
-╚══════════════════════════════╝
-
-👋 *Bem-vindo, Boss!*
-
-📌 *Ações rápidas:*
-• /gerar — Criar nova licença
-• /trial — Gerar trial 7 dias
-• /listar — Ver todas as licenças
-• /estatisticas — Estatísticas gerais
-• /avisos — Licenças expirando
-• /cupons — Gerenciar cupons
-• /backup — Exportar JSON
-• /broadcast — Enviar mensagem
-• /ajuda — Lista completa
-
-_Selecione uma opção abaixo:_`;
-
-// ============================================================
-//  CHAVES
-// ============================================================
 function loadKeyFromFile(filePath, envVal, label) {
   if (fs.existsSync(filePath)) {
-    try { const c = fs.readFileSync(filePath, 'utf8'); console.log('✅ ' + label + ' → ' + filePath); return c; }
-    catch (e) { console.error('⚠️ ' + label + ':', e.message); }
+    try { const c = fs.readFileSync(filePath, 'utf8'); console.log('OK ' + label + ' -> ' + filePath); return c; }
+    catch (e) { console.error('ERR ' + label + ':', e.message); }
   }
   if (envVal) {
     let v = envVal.trim();
     if (!v.includes('BEGIN')) { try { v = Buffer.from(v, 'base64').toString('utf8'); } catch (e) {} }
     else { v = v.replace(/\\n/g, '\n'); }
-    console.log('✅ ' + label + ' → env var');
+    console.log('OK ' + label + ' -> env');
     return v;
   }
-  console.error('❌ ' + label + ' NÃO ENCONTRADA');
+  console.error('MISSING ' + label);
   return null;
 }
 
@@ -66,8 +44,8 @@ const privateKey = loadKeyFromFile('/etc/secrets/private.pem', process.env.EC_PR
 const publicKey  = loadKeyFromFile('/etc/secrets/public.pem',  process.env.EC_PUBLIC_KEY,  'EC_PUBLIC_KEY');
 
 console.log('========== BOOT ==========');
-console.log('privateKey existe?', !!privateKey);
-if (privateKey) { try { crypto.createPrivateKey(privateKey); console.log('✅ privateKey VÁLIDA'); } catch (e) { console.error('❌', e.message); } }
+console.log('privateKey?', !!privateKey);
+if (privateKey) { try { crypto.createPrivateKey(privateKey); console.log('OK privateKey VALIDA'); } catch (e) { console.error('ERR privateKey:', e.message); } }
 console.log('==========================');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -75,9 +53,6 @@ const OWNER_ID = process.env.OWNER_ID;
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-// ============================================================
-//  REDIS
-// ============================================================
 async function redisSet(key, value) {
   return (await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
@@ -94,8 +69,7 @@ async function redisGet(key) {
 }
 async function redisDel(key) {
   return (await fetch(`${UPSTASH_URL}/del/${encodeURIComponent(key)}`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
+    method: 'POST', headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
   })).json();
 }
 async function redisKeys(pattern = 'ASHEO-*') {
@@ -112,19 +86,10 @@ async function redisPush(key, value) {
   return arr;
 }
 
-// ============================================================
-//  UTILS
-// ============================================================
 function generateLicenseKey() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const b = () => { let s = ''; for (let i = 0; i < 4; i++) s += chars[crypto.randomInt(0, chars.length)]; return s; };
   return `ASHEO-${b()}-${b()}-${b()}-${b()}`;
-}
-function generateCouponCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let s = '';
-  for (let i = 0; i < 8; i++) s += chars[crypto.randomInt(0, chars.length)];
-  return s;
 }
 function fmtDate(ts) {
   const d = new Date(ts);
@@ -150,57 +115,34 @@ function statusTexto(lic) {
   if (isExpired(lic)) return 'Expirada';
   return 'Ativa';
 }
-function aplicarCupom(preco, cupom) {
-  if (!cupom) return { preco, desconto: 0, cupom: null };
-  if (cupom.tipo === 'percent') {
-    const desconto = preco * (cupom.valor / 100);
-    return { preco: Math.max(0, preco - desconto), desconto, cupom };
-  } else if (cupom.tipo === 'fixed') {
-    return { preco: Math.max(0, preco - cupom.valor), desconto: cupom.valor, cupom };
-  }
-  return { preco, desconto: 0, cupom: null };
-}
 
-// ============================================================
-//  TELEGRAM
-// ============================================================
-async function sendTelegramMessage(chatId, text, keyboard = null) {
+async function tgSend(token, chatId, text, keyboard = null) {
   const body = { chat_id: chatId, text, parse_mode: 'Markdown' };
   if (keyboard) body.reply_markup = keyboard;
   try {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
-  } catch (e) { console.error('sendTelegramMessage:', e); }
+  } catch (e) {}
 }
-async function answerCallbackQuery(id, text) {
+async function tgAnswer(token, id, text) {
   try {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/answerCallbackQuery`, {
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ callback_query_id: id, text })
     });
   } catch (e) {}
 }
+const sendAdmin = (chatId, text, kb) => tgSend(TELEGRAM_TOKEN, chatId, text, kb);
 
-// ============================================================
-//  LOGS
-// ============================================================
 async function logAcao(acao, detalhes) {
-  await redisPush('ASHEO_LOG', {
-    acao, detalhes, at: Date.now()
-  });
-}
-async function registrarVenda(key, lic, cupomUsado) {
-  const venda = {
-    key, plano: lic.label, preco: lic.price, precoOriginal: lic.originalPrice || lic.price,
-    cupom: cupomUsado || null, at: Date.now(), installId: lic.installId || null
-  };
-  await redisPush('ASHEO_SALES', venda);
+  await redisPush('ASHEO_LOG', { acao, detalhes, at: Date.now() });
 }
 
 // ============================================================
-//  JWT
+//  JWT COM TODAS AS FEATURES
 // ============================================================
 function generateLicenseToken(installId, plan, days) {
+  if (!privateKey) throw new Error('privateKey nao carregada');
   const now = Math.floor(Date.now() / 1000);
   return jwt.sign({
     sub: installId, installId, status: 'active',
@@ -233,9 +175,9 @@ function generateLicenseToken(installId, plan, days) {
 }
 
 // ============================================================
-//  ROTAS HTTP
+//  HTTP
 // ============================================================
-app.get('/', (req, res) => res.json({ ok: true, service: 'mozlince-license', status: 'live', ts: Date.now() }));
+app.get('/', (req, res) => res.json({ ok: true, ts: Date.now() }));
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.post('/v1/activate', async (req, res) => {
@@ -243,17 +185,13 @@ app.post('/v1/activate', async (req, res) => {
     const { installId, licenseKey } = req.body || {};
     if (!installId || !licenseKey) return res.status(400).json({ error: 'missing_params' });
     if (!privateKey) return res.status(500).json({ error: 'no_private_key' });
-
     const lic = await redisGet(licenseKey);
     if (!lic) return res.status(401).json({ error: 'invalid_license' });
     if (!lic.active) return res.status(403).json({ error: 'revoked' });
     if (isExpired(lic)) return res.status(403).json({ error: 'expired' });
-
     if (!lic.installId) { lic.installId = installId; await redisSet(licenseKey, lic); }
     else if (lic.installId !== installId) return res.status(403).json({ error: 'seat_taken', installId: lic.installId });
-
     const token = generateLicenseToken(installId, lic.plan, lic.days);
-    console.log(`[activate] ${installId} ${licenseKey}`);
     res.json({ token, tier: lic.plan, seat: 1, seats: 1, gwPass: null, secret: 'segredo-' + installId, status: 'active', plan: lic.plan, days: lic.days });
   } catch (e) {
     console.error('[activate]', e);
@@ -263,9 +201,6 @@ app.post('/v1/activate', async (req, res) => {
 
 app.post('/v1/deactivate', (req, res) => res.json({ ok: true }));
 
-// ============================================================
-//  DASHBOARD WEB
-// ============================================================
 app.get('/dashboard', async (req, res) => {
   try {
     const keys = await redisKeys();
@@ -274,538 +209,323 @@ app.get('/dashboard', async (req, res) => {
     for (const k of keys) {
       const lic = await redisGet(k);
       if (!lic) continue;
-      licencas.push({ key: k, ...lic, status: statusTexto(lic), dias: diasRestantes(lic) });
+      licencas.push({ key: k, ...lic, status: statusEmoji(lic), dias: diasRestantes(lic) });
       if (!lic.active) revogadas++;
       else if (isExpired(lic)) expiradas++;
       else ativas++;
       receita += lic.price || 0;
     }
     const sales = await redisGet('ASHEO_SALES') || [];
-    const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Mozlince Dashboard</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
-body{background:#0a0a0f;color:#e0e0e0;padding:20px}
-h1{color:#f0b429;margin-bottom:20px;font-size:28px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px;margin-bottom:30px}
-.card{background:linear-gradient(135deg,#1a1a2e,#16213e);padding:20px;border-radius:12px;border:1px solid #2a2a4a}
-.card .label{font-size:12px;color:#888;text-transform:uppercase;letter-spacing:1px}
-.card .value{font-size:32px;font-weight:bold;color:#f0b429;margin-top:8px}
-table{width:100%;border-collapse:collapse;background:#12121a;border-radius:12px;overflow:hidden}
-th,td{padding:12px;text-align:left;border-bottom:1px solid #222}
-th{background:#1a1a2e;color:#f0b429;font-size:12px;text-transform:uppercase;letter-spacing:1px}
-tr:hover{background:#1a1a2e}
-.status{display:inline-block;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:bold}
-.status.Ativa{background:#0a4d2e;color:#4ade80}
-.status.Expirada{background:#4d2e0a;color:#fbbf24}
-.status.Revogada{background:#4d0a0a;color:#f87171}
-.mono{font-family:monospace;font-size:12px;color:#888}
-</style></head><body>
+    res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Mozlince</title>
+<style>body{background:#0a0a0f;color:#e0e0e0;padding:20px;font-family:sans-serif}h1{color:#f0b429}table{width:100%;border-collapse:collapse;background:#12121a;border-radius:10px}th,td{padding:12px;text-align:left;border-bottom:1px solid #222}th{background:#1a1a2e;color:#f0b429}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px;margin:20px 0}.card{background:#1a1a2e;padding:20px;border-radius:10px}.card .v{font-size:28px;color:#f0b429;font-weight:bold}.mono{font-family:monospace;font-size:12px}</style></head><body>
 <h1>🎫 Mozlince Dashboard</h1>
 <div class="cards">
-<div class="card"><div class="label">Total</div><div class="value">${licencas.length}</div></div>
-<div class="card"><div class="label">Ativas</div><div class="value">${ativas}</div></div>
-<div class="card"><div class="label">Expiradas</div><div class="value">${expiradas}</div></div>
-<div class="card"><div class="label">Revogadas</div><div class="value">${revogadas}</div></div>
-<div class="card"><div class="label">Receita</div><div class="value">R$ ${receita.toFixed(2)}</div></div>
-<div class="card"><div class="label">Vendas</div><div class="value">${sales.length}</div></div>
+<div class="card"><div>Total</div><div class="v">${licencas.length}</div></div>
+<div class="card"><div>Ativas</div><div class="v">${ativas}</div></div>
+<div class="card"><div>Expiradas</div><div class="v">${expiradas}</div></div>
+<div class="card"><div>Revogadas</div><div class="v">${revogadas}</div></div>
+<div class="card"><div>Receita</div><div class="v">R$ ${receita.toFixed(2)}</div></div>
 </div>
-<h2 style="color:#f0b429;margin:20px 0 10px">📋 Licenças</h2>
+<h2 style="color:#f0b429">Licenças</h2>
 <table><thead><tr><th>Chave</th><th>Plano</th><th>Status</th><th>Dias</th><th>Install</th><th>Expira</th></tr></thead><tbody>
-${licencas.map(l => `<tr><td class="mono">${l.key}</td><td>${l.label || l.days+'d'}</td><td><span class="status ${l.status}">${l.status}</span></td><td>${l.days > 0 ? l.dias : '-'}</td><td class="mono">${(l.installId||'livre').slice(0,8)}</td><td class="mono">${fmtDate(expiraEm(l))}</td></tr>`).join('')}
-</tbody></table>
-<h2 style="color:#f0b429;margin:30px 0 10px">💰 Últimas Vendas</h2>
-<table><thead><tr><th>Data</th><th>Chave</th><th>Plano</th><th>Preço</th><th>Cupom</th></tr></thead><tbody>
-${sales.slice(-20).reverse().map(s => `<tr><td class="mono">${fmtDate(s.at)}</td><td class="mono">${s.key}</td><td>${s.plano}</td><td>R$ ${s.preco.toFixed(2)}</td><td>${s.cupom || '-'}</td></tr>`).join('')}
-</tbody></table>
-<p style="text-align:center;color:#444;margin-top:40px;font-size:12px">Mozlince License System © ${new Date().getFullYear()}</p>
-</body></html>`;
-    res.send(html);
-  } catch (e) {
-    console.error('Dashboard erro:', e);
-    res.status(500).send('Erro ao carregar dashboard');
-  }
+${licencas.map(l => `<tr><td class="mono">${l.key}</td><td>${l.label || l.days+'d'}</td><td>${l.status}</td><td>${l.dias>0?l.dias:'-'}</td><td class="mono">${(l.installId||'livre').slice(0,12)}</td><td class="mono">${fmtDate(expiraEm(l))}</td></tr>`).join('')}
+</tbody></table></body></html>`);
+  } catch (e) { res.status(500).send('Erro'); }
 });
 
 // ============================================================
-//  WEBHOOK TELEGRAM
+//  WEBHOOK ADMIN — COM TODOS OS COMANDOS
 // ============================================================
-app.post('/telegram-webhook', async (req, res) => {
+app.post('/telegram-webhook-admin', async (req, res) => {
   const update = req.body;
+  const T = TELEGRAM_TOKEN;
 
-  // ============ CALLBACKS ============
-  if (update.callback_query) {
-    const cb = update.callback_query;
-    const chatId = cb.message.chat.id;
-    const data = cb.data;
+  try {
+    // ========== CALLBACKS ==========
+    if (update.callback_query) {
+      const cb = update.callback_query;
+      const chatId = cb.message.chat.id;
+      const data = cb.data;
+      if (String(chatId) !== String(OWNER_ID)) { await tgAnswer(T, cb.id, '⛔'); return res.sendStatus(200); }
 
-    if (String(chatId) !== String(OWNER_ID)) {
-      await answerCallbackQuery(cb.id, '⛔ Sem permissão.');
+      if (data.startsWith('buy_')) {
+        const planKey = data.slice(4);
+        const plan = PRICES[planKey];
+        if (!plan) { await tgAnswer(T, cb.id, '❌'); return res.sendStatus(200); }
+        const key = generateLicenseKey();
+        const lic = { plan: 'premium', days: plan.dias, price: plan.preco, originalPrice: plan.preco, label: plan.label, createdAt: Date.now(), active: true, installId: null };
+        await redisSet(key, lic);
+        await redisPush('ASHEO_SALES', { key, plano: plan.label, preco: plan.preco, at: Date.now() });
+        await tgAnswer(T, cb.id, `✅ ${plan.label}!`);
+        await sendAdmin(chatId,
+          `╔══════════════════════════════╗\n║   🔔 *NOVA LICENÇA*           ║\n╚══════════════════════════════╝\n\n🔑 \`${key}\`\n📦 ${plan.label}\n💰 R$ ${plan.preco.toFixed(2)}\n📅 ${plan.dias === 3650 ? 'Nunca' : fmtDate(Date.now() + plan.dias * 86400000)}\n🎯 🟢 Ativa`
+        );
+      }
+      if (data.startsWith('info_')) {
+        const key = data.slice(5);
+        const lic = await redisGet(key);
+        if (!lic) { await tgAnswer(T, cb.id, '❌'); return res.sendStatus(200); }
+        const d = diasRestantes(lic);
+        await tgAnswer(T, cb.id, '📋');
+        await sendAdmin(chatId,
+          `📋 *DETALHES*\n\n🔑 \`${key}\`\n${statusEmoji(lic)} ${statusTexto(lic)}\n👤 \`${lic.installId || 'livre'}\`\n📦 ${lic.label || lic.days + 'd'}\n💰 R$ ${(lic.price || 0).toFixed(2)}\n📅 ${fmtDate(lic.createdAt)}\n⏰ ${lic.days === 3650 ? 'Nunca' : fmtDate(expiraEm(lic))}\n${lic.days !== 3650 ? '⏳ ' + (d > 0 ? d + ' dias' : 'Expirada') : ''}`,
+          { inline_keyboard: [[{ text: '🔓 Desvincular', callback_data: 'unbind_' + key }, { text: '♻️ Resetar', callback_data: 'reset_' + key }], [{ text: '🗑️ Excluir', callback_data: 'del_' + key }, { text: '🔙 Menu', callback_data: 'menu' }]] }
+        );
+      }
+      if (data.startsWith('unbind_')) { const key = data.slice(7); const lic = await redisGet(key); if (lic) { lic.installId = null; await redisSet(key, lic); await tgAnswer(T, cb.id, '🔓'); await sendAdmin(chatId, `🔓 \`${key}\` desvinculada.`); } }
+      if (data.startsWith('reset_')) { const key = data.slice(6); const lic = await redisGet(key); if (lic) { lic.installId = null; lic.active = true; lic.createdAt = Date.now(); await redisSet(key, lic); await tgAnswer(T, cb.id, '♻️'); await sendAdmin(chatId, `♻️ \`${key}\` resetada.`); } }
+      if (data.startsWith('del_')) { const key = data.slice(4); await redisDel(key); await tgAnswer(T, cb.id, '🗑️'); await sendAdmin(chatId, `🗑️ \`${key}\` excluída.`); }
+      if (data === 'delall_confirm') {
+        const keys = await redisKeys();
+        for (const k of keys) await redisDel(k);
+        await tgAnswer(T, cb.id, `🗑️ ${keys.length}`);
+        await sendAdmin(chatId, `🗑️ *${keys.length} licenças* excluídas.`);
+      }
+      if (data === 'menu' || data === 'back') { await tgAnswer(T, cb.id, '🏠'); await sendAdmin(chatId, buildMenu()); }
+      if (data === 'stats') {
+        const keys = await redisKeys();
+        let a = 0, ex = 0, rv = 0, rec = 0;
+        for (const k of keys) { const l = await redisGet(k); if (!l) continue; if (!l.active) rv++; else if (isExpired(l)) ex++; else a++; rec += l.price || 0; }
+        await tgAnswer(T, cb.id, '📊');
+        await sendAdmin(chatId, `📊 *ESTATÍSTICAS*\n\n📦 ${keys.length}\n🟢 ${a}\n⏰ ${ex}\n🔴 ${rv}\n💰 R$ ${rec.toFixed(2)}`);
+      }
       return res.sendStatus(200);
     }
 
-    // ==== MENU PRINCIPAL ====
-    if (data === 'menu') { await answerCallbackQuery(cb.id, '🏠'); await sendTelegramMessage(chatId, WELCOME_TEXT); return res.sendStatus(200); }
-    if (data === 'back') { await answerCallbackQuery(cb.id, '🔙'); await sendTelegramMessage(chatId, WELCOME_TEXT); return res.sendStatus(200); }
+    // ========== COMANDOS ==========
+    if (!update.message?.text) return res.sendStatus(200);
+    const chatId = update.message.chat.id;
+    const args = update.message.text.trim().replace(/\n/g, ' ').split(' ').filter(a => a.length > 0);
+    const cmd = args[0].toLowerCase();
 
-    // ==== COMPRAR / GERAR ====
-    if (data.startsWith('buy_')) {
-      const planKey = data.slice(4);
-      const plan = PRICES[planKey];
-      if (!plan) { await answerCallbackQuery(cb.id, '❌ Plano inválido'); return res.sendStatus(200); }
+    if (String(chatId) !== String(OWNER_ID)) { await tgSend(T, chatId, '⛔'); return res.sendStatus(200); }
 
-      const licenseKey = generateLicenseKey();
-      const lic = {
-        plan: 'premium', days: plan.dias, price: plan.preco, originalPrice: plan.preco, label: plan.label,
-        createdAt: Date.now(), active: true, installId: null, soldBy: 'owner'
-      };
+    // ========== /start ==========
+    if (cmd === '/start') {
+      await sendAdmin(chatId, buildMenu());
+    }
+
+    // ========== /gerar ==========
+    else if (cmd === '/gerar') {
+      const kb = { inline_keyboard: [
+        [{ text: '3 Dias — R$ 2,99', callback_data: 'buy_3d' }, { text: '7 Dias — R$ 4,99', callback_data: 'buy_7d' }],
+        [{ text: '15 Dias — R$ 7,99', callback_data: 'buy_15d' }, { text: '30 Dias — R$ 12,99', callback_data: 'buy_30d' }],
+        [{ text: '90 Dias — R$ 29,99', callback_data: 'buy_90d' }, { text: '1 Ano — R$ 79,99', callback_data: 'buy_365d' }],
+        [{ text: '💎 ILIMITADO — R$ 149,99', callback_data: 'buy_ltd' }],
+        [{ text: '🔙 Voltar', callback_data: 'back' }]
+      ]};
+      await sendAdmin(chatId, '💰 *TABELA DE PREÇOS*\n\nEscolha um plano:', kb);
+    }
+
+    // ========== /trial ==========
+    else if (cmd === '/trial') {
+      const key = generateLicenseKey();
+      await redisSet(key, { plan: 'premium', days: 7, price: 0, originalPrice: 4.99, label: 'Trial 7 Dias', createdAt: Date.now(), active: true, installId: null, trial: true });
+      await sendAdmin(chatId, `🎁 *Trial 7 dias:*\n\`${key}\``);
+    }
+
+    // ========== /activate ==========
+    else if (cmd === '/activate') {
+      const licenseKey = args[args.length - 1];
+      const installId = args.slice(1, args.length - 1).join(' ');
+      if (!installId || !licenseKey) { await sendAdmin(chatId, '⚠️ Use: /activate <installId> <chave>'); return res.sendStatus(200); }
+      const lic = await redisGet(licenseKey);
+      if (!lic) { await sendAdmin(chatId, `❌ \`${licenseKey}\` não encontrada.`); return res.sendStatus(200); }
+      if (lic.installId) { await sendAdmin(chatId, `⚠️ Já vinculada. Use /desvincular.`); return res.sendStatus(200); }
+      lic.installId = installId;
       await redisSet(licenseKey, lic);
-      await registrarVenda(licenseKey, lic, null);
-      await logAcao('GERAR', { key: licenseKey, plano: plan.label, preco: plan.preco });
-
-      await answerCallbackQuery(cb.id, `✅ ${plan.label} gerada!`);
-
-      // ==== NOTIFICAÇÃO DE NOVA VENDA ====
-      await sendTelegramMessage(chatId,
-        `╔══════════════════════════════╗\n` +
-        `║   🔔 *NOVA VENDA REGISTRADA*  ║\n` +
-        `╚══════════════════════════════╝\n\n` +
-        `🔑 *Chave:*\n\`${licenseKey}\`\n\n` +
-        `📦 *Plano:* ${plan.label}\n` +
-        `💰 *Valor:* R$ ${plan.preco.toFixed(2)}\n` +
-        `📅 *Expira:* ${plan.dias === 3650 ? 'Nunca' : fmtDate(Date.now() + plan.dias * 86400000)}\n` +
-        `🎯 *Status:* 🟢 Ativa\n` +
-        `🕐 *Gerada:* ${fmtDate(Date.now())}\n\n` +
-        `_Envie a chave para o cliente._`,
-        { inline_keyboard: [
-          [{ text: '📋 Ver detalhes', callback_data: 'info_' + licenseKey }],
-          [{ text: '🔙 Menu', callback_data: 'back' }]
-        ]}
-      );
+      await sendAdmin(chatId, `✅ \`${licenseKey}\` vinculada a \`${installId}\`.`);
     }
 
-    // ==== INFO ====
-    if (data.startsWith('info_')) {
-      const key = data.slice(5);
+    // ========== /desvincular ==========
+    else if (cmd === '/desvincular') {
+      const key = args[1];
+      if (!key) { await sendAdmin(chatId, '⚠️ Use: /desvincular <chave>'); return res.sendStatus(200); }
       const lic = await redisGet(key);
-      if (!lic) { await answerCallbackQuery(cb.id, '❌ Não encontrada'); return res.sendStatus(200); }
-      const dias = diasRestantes(lic);
-      await answerCallbackQuery(cb.id, '📋');
-      await sendTelegramMessage(chatId,
-        `📋 *DETALHES*\n\n` +
-        `🔑 \`${key}\`\n` +
-        `${statusEmoji(lic)} *Status:* ${statusTexto(lic)}\n` +
-        `👤 *Install:* \`${lic.installId || 'livre'}\`\n` +
-        `📦 *Plano:* ${lic.label || lic.days + 'd'}\n` +
-        `💰 *Valor:* R$ ${(lic.price || 0).toFixed(2)}\n` +
-        `📅 *Criada:* ${fmtDate(lic.createdAt)}\n` +
-        `⏰ *Expira:* ${lic.days === 3650 ? 'Nunca' : fmtDate(expiraEm(lic))}\n` +
-        (lic.days !== 3650 ? `⏳ *Restam:* ${dias > 0 ? dias + 'd' : 'Expirada'}\n` : '') +
-        (lic.cupom ? `🎟️ *Cupom:* ${lic.cupom}\n` : ''),
-        { inline_keyboard: [
-          [{ text: '🔓 Desvincular', callback_data: 'unbind_' + key }, { text: '♻️ Resetar', callback_data: 'reset_' + key }],
-          [{ text: '🗑️ Excluir', callback_data: 'del_' + key }, { text: '🔙 Menu', callback_data: 'back' }]
-        ]}
-      );
-    }
-
-    // ==== DESVINCULAR / RESET / DELETAR ====
-    if (data.startsWith('unbind_')) {
-      const key = data.slice(7);
-      const lic = await redisGet(key);
-      if (!lic) { await answerCallbackQuery(cb.id, '❌'); return res.sendStatus(200); }
+      if (!lic) { await sendAdmin(chatId, `❌ \`${key}\` não encontrada.`); return res.sendStatus(200); }
       lic.installId = null;
       await redisSet(key, lic);
-      await logAcao('DESVINCULAR', { key });
-      await answerCallbackQuery(cb.id, '🔓');
-      await sendTelegramMessage(chatId, `🔓 \`${key}\` desvinculada.`);
-    }
-    if (data.startsWith('reset_')) {
-      const key = data.slice(6);
-      const lic = await redisGet(key);
-      if (!lic) { await answerCallbackQuery(cb.id, '❌'); return res.sendStatus(200); }
-      lic.installId = null; lic.active = true; lic.createdAt = Date.now();
-      await redisSet(key, lic);
-      await logAcao('RESET', { key });
-      await answerCallbackQuery(cb.id, '♻️');
-      await sendTelegramMessage(chatId, `♻️ \`${key}\` resetada.`);
-    }
-    if (data.startsWith('del_')) {
-      const key = data.slice(4);
-      await redisDel(key);
-      await logAcao('EXCLUIR', { key });
-      await answerCallbackQuery(cb.id, '🗑️');
-      await sendTelegramMessage(chatId, `🗑️ \`${key}\` excluída.`);
-    }
-    if (data === 'delall_confirm') {
-      const keys = await redisKeys();
-      let c = 0;
-      for (const k of keys) { await redisDel(k); c++; }
-      await logAcao('EXCLUIR_TUDO', { count: c });
-      await answerCallbackQuery(cb.id, `🗑️ ${c}`);
-      await sendTelegramMessage(chatId, `🗑️ *${c} licenças* excluídas.`);
+      await sendAdmin(chatId, `🔓 \`${key}\` desvinculada.`);
     }
 
-    // ==== ESTATÍSTICAS ====
-    if (data === 'stats') {
+    // ========== /reset ==========
+    else if (cmd === '/reset') {
+      const key = args[1];
+      if (!key) { await sendAdmin(chatId, '⚠️ Use: /reset <chave>'); return res.sendStatus(200); }
+      const lic = await redisGet(key);
+      if (!lic) { await sendAdmin(chatId, `❌ \`${key}\` não encontrada.`); return res.sendStatus(200); }
+      lic.installId = null; lic.active = true; lic.createdAt = Date.now();
+      await redisSet(key, lic);
+      await sendAdmin(chatId, `♻️ \`${key}\` resetada.`);
+    }
+
+    // ========== /status e /info ==========
+    else if (cmd === '/status' || cmd === '/info') {
+      const key = args[1];
+      if (!key) { await sendAdmin(chatId, '⚠️ Use: /status <chave>'); return res.sendStatus(200); }
+      const lic = await redisGet(key);
+      if (!lic) { await sendAdmin(chatId, `❌ \`${key}\` não encontrada.`); return res.sendStatus(200); }
+      const d = diasRestantes(lic);
+      await sendAdmin(chatId,
+        `📋 *DETALHES*\n\n🔑 \`${key}\`\n${statusEmoji(lic)} ${statusTexto(lic)}\n👤 \`${lic.installId || 'livre'}\`\n📦 ${lic.label || lic.days + 'd'}\n💰 R$ ${(lic.price || 0).toFixed(2)}\n📅 ${fmtDate(lic.createdAt)}\n⏰ ${lic.days === 3650 ? 'Nunca' : fmtDate(expiraEm(lic))}\n${lic.days !== 3650 ? '⏳ ' + (d > 0 ? d + ' dias' : 'Expirada') : ''}`
+      );
+    }
+
+    // ========== /revogar ==========
+    else if (cmd === '/revogar') {
+      const key = args[1];
+      if (!key) { await sendAdmin(chatId, '⚠️ Use: /revogar <chave>'); return res.sendStatus(200); }
+      const lic = await redisGet(key);
+      if (!lic) { await sendAdmin(chatId, `❌ \`${key}\` não encontrada.`); return res.sendStatus(200); }
+      lic.active = false;
+      await redisSet(key, lic);
+      await sendAdmin(chatId, `🔴 \`${key}\` revogada.`);
+    }
+
+    // ========== /listar ==========
+    else if (cmd === '/listar') {
       const keys = await redisKeys();
-      let ativas = 0, expiradas = 0, revogadas = 0, vinculadas = 0, livres = 0, receita = 0;
+      if (!keys.length) { await sendAdmin(chatId, '📭 Nenhuma licença.'); return res.sendStatus(200); }
+      let msg = `📋 *LICENÇAS* (${keys.length})\n\n`;
+      let cont = 0;
       for (const k of keys) {
         const lic = await redisGet(k);
         if (!lic) continue;
-        if (!lic.active) revogadas++;
-        else if (isExpired(lic)) expiradas++;
-        else ativas++;
-        if (lic.installId) vinculadas++; else livres++;
-        receita += lic.price || 0;
+        const d = diasRestantes(lic);
+        msg += `${statusEmoji(lic)} \`${k}\` — ${lic.label || lic.days + 'd'} — ${lic.installId ? '👤' : '🔓'}`;
+        if (lic.days !== 3650 && lic.active && !isExpired(lic)) msg += ` — ${d}d`;
+        msg += `\n`;
+        cont++;
+        if (cont % 15 === 0) { await sendAdmin(chatId, msg); msg = ''; }
       }
-      const sales = await redisGet('ASHEO_SALES') || [];
-      await answerCallbackQuery(cb.id, '📊');
-      await sendTelegramMessage(chatId,
-        `╔══════════════════════════════╗\n` +
-        `║   📊 *ESTATÍSTICAS*           ║\n` +
-        `╚══════════════════════════════╝\n\n` +
-        `📦 Total: *${keys.length}*\n` +
-        `🟢 Ativas: *${ativas}*\n` +
-        `⏰ Expiradas: *${expiradas}*\n` +
-        `🔴 Revogadas: *${revogadas}*\n` +
-        `👤 Vinculadas: *${vinculadas}*\n` +
-        `🔓 Livres: *${livres}*\n\n` +
-        `💰 Receita total: *R$ ${receita.toFixed(2)}*\n` +
-        `📈 Vendas: *${sales.length}*`
+      if (msg) await sendAdmin(chatId, msg);
+    }
+
+    // ========== /excluir ==========
+    else if (cmd === '/excluir') {
+      const key = args[1];
+      if (!key) { await sendAdmin(chatId, '⚠️ Use: /excluir <chave>'); return res.sendStatus(200); }
+      await redisDel(key);
+      await sendAdmin(chatId, `🗑️ \`${key}\` excluída.`);
+    }
+
+    // ========== /excluirtudo ==========
+    else if (cmd === '/excluirtudo') {
+      const keys = await redisKeys();
+      await sendAdmin(chatId,
+        `🚨 *ATENÇÃO*\n\nVai excluir *${keys.length} licenças* permanentemente.`,
+        { inline_keyboard: [[{ text: '⚠️ SIM, EXCLUIR TUDO', callback_data: 'delall_confirm' }], [{ text: '❌ Cancelar', callback_data: 'back' }]] }
       );
     }
 
-    // ==== AVISOS ====
-    if (data === 'alerts') {
-      const keys = await redisKeys();
-      let criticas = [];
-      for (const k of keys) {
-        const lic = await redisGet(k);
-        if (!lic || !lic.active || isExpired(lic) || lic.days === 3650) continue;
-        const d = diasRestantes(lic);
-        if (d <= 7) criticas.push({ key: k, lic, dias: d });
-      }
-      criticas.sort((a, b) => a.dias - b.dias);
-      let msg = `🚨 *AVISOS DE EXPIRAÇÃO*\n\n`;
-      if (!criticas.length) msg += `✅ Nenhuma expirando em 7 dias.`;
-      else for (const c of criticas) msg += `${statusEmoji(c.lic)} \`${c.key}\` — *${c.dias}d* — ${c.lic.installId ? '👤' : '🔓'}\n`;
-      await answerCallbackQuery(cb.id, '🚨');
-      await sendTelegramMessage(chatId, msg);
+    // ========== /cupom_pct e /cupom_fix ==========
+    else if (cmd === '/cupom_pct' || cmd === '/cupom_fix') {
+      const [, code, val, maxU] = args;
+      if (!code || !val) { await sendAdmin(chatId, `⚠️ Use: ${cmd} <código> <valor> [max]`); return res.sendStatus(200); }
+      const coupons = await redisGet('ASHEO_COUPONS') || {};
+      coupons[code.toUpperCase()] = {
+        tipo: cmd === '/cupom_pct' ? 'percent' : 'fixed',
+        valor: parseFloat(val),
+        maxUsos: maxU ? parseInt(maxU) : null,
+        usos: 0, createdAt: Date.now()
+      };
+      await redisSet('ASHEO_COUPONS', coupons);
+      await sendAdmin(chatId, `✅ Cupom *${code.toUpperCase()}* criado.`);
     }
 
-    // ==== BACKUP ====
-    if (data === 'backup') {
+    // ========== /cupons ==========
+    else if (cmd === '/cupons') {
+      const coupons = await redisGet('ASHEO_COUPONS') || {};
+      const ks = Object.keys(coupons);
+      let msg = `🎟️ *CUPONS* (${ks.length})\n\n`;
+      if (!ks.length) msg += '_Nenhum._';
+      else for (const c of ks) { const cp = coupons[c]; msg += `*${c}* — ${cp.tipo === 'percent' ? cp.valor + '%' : 'R$ ' + cp.valor.toFixed(2)} — ${cp.usos || 0}/${cp.maxUsos || '∞'}\n`; }
+      await sendAdmin(chatId, msg);
+    }
+
+    // ========== /cupom_del ==========
+    else if (cmd === '/cupom_del') {
+      const code = args[1]?.toUpperCase();
+      if (!code) { await sendAdmin(chatId, '⚠️ Use: /cupom_del <código>'); return res.sendStatus(200); }
+      const coupons = await redisGet('ASHEO_COUPONS') || {};
+      delete coupons[code];
+      await redisSet('ASHEO_COUPONS', coupons);
+      await sendAdmin(chatId, `🗑️ Cupom *${code}* excluído.`);
+    }
+
+    // ========== /broadcast ==========
+    else if (cmd === '/broadcast') {
+      const text = args.slice(1).join(' ');
+      if (!text) { await sendAdmin(chatId, '⚠️ Use: /broadcast <mensagem>'); return res.sendStatus(200); }
+      await redisSet('ASHEO_BROADCAST_PENDING', { text, at: Date.now() });
+      await sendAdmin(chatId, `📢 *Broadcast*\n\n"${text}"`, {
+        inline_keyboard: [[{ text: '✅ ENVIAR', callback_data: 'broadcast_confirm' }], [{ text: '❌ Cancelar', callback_data: 'back' }]]
+      });
+    }
+
+    // ========== /logs ==========
+    else if (cmd === '/logs') {
+      const logs = await redisGet('ASHEO_LOG') || [];
+      let msg = `📜 *LOGS* (${logs.length})\n\n`;
+      for (const l of logs.slice(-15).reverse()) msg += `• \`${l.acao}\` — ${fmtDate(l.at)}\n`;
+      await sendAdmin(chatId, msg);
+    }
+
+    // ========== /estatisticas ==========
+    else if (cmd === '/estatisticas' || cmd === '/stats') {
+      const keys = await redisKeys();
+      let a = 0, ex = 0, rv = 0, vin = 0, rec = 0;
+      for (const k of keys) { const l = await redisGet(k); if (!l) continue; if (!l.active) rv++; else if (isExpired(l)) ex++; else a++; if (l.installId) vin++; rec += l.price || 0; }
+      await sendAdmin(chatId, `📊 *ESTATÍSTICAS*\n\n📦 Total: ${keys.length}\n🟢 Ativas: ${a}\n⏰ Expiradas: ${ex}\n🔴 Revogadas: ${rv}\n👤 Vinculadas: ${vin}\n💰 R$ ${rec.toFixed(2)}`);
+    }
+
+    // ========== /avisos ==========
+    else if (cmd === '/avisos') {
+      const keys = await redisKeys();
+      let crit = [];
+      for (const k of keys) { const l = await redisGet(k); if (!l || !l.active || isExpired(l) || l.days === 3650) continue; const d = diasRestantes(l); if (d <= 7) crit.push({ k, d }); }
+      crit.sort((a, b) => a.d - b.d);
+      let msg = `🚨 *AVISOS*\n\n`;
+      if (!crit.length) msg += '✅ Nenhuma expirando.';
+      else for (const c of crit) msg += `⚠️ \`${c.k}\` — ${c.d}d\n`;
+      await sendAdmin(chatId, msg);
+    }
+
+    // ========== /backup ==========
+    else if (cmd === '/backup') {
       const keys = await redisKeys();
       const d = {};
       for (const k of keys) d[k] = await redisGet(k);
       const json = JSON.stringify(d, null, 2);
-      await answerCallbackQuery(cb.id, '📦');
-      await sendTelegramMessage(chatId, `📦 *Backup* (${keys.length} licenças)`);
+      await sendAdmin(chatId, `📦 *Backup* (${keys.length} licenças)`);
       try {
-        const formData = new FormData();
-        formData.append('chat_id', chatId);
-        formData.append('caption', `📦 Mozlince backup — ${fmtDate(Date.now())}`);
-        formData.append('document', new Blob([json], { type: 'application/json' }), `mozlince-${Date.now()}.json`);
-        await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument`, { method: 'POST', body: formData });
-      } catch (e) { await sendTelegramMessage(chatId, '❌ Erro ao enviar.'); }
+        const fd = new FormData();
+        fd.append('chat_id', chatId);
+        fd.append('document', new Blob([json], { type: 'application/json' }), `backup-${Date.now()}.json`);
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+      } catch (e) { await sendAdmin(chatId, '❌ Erro no arquivo.'); }
     }
 
-    // ==== CUPONS ====
-    if (data === 'coupons_list') {
-      const coupons = await redisGet('ASHEO_COUPONS') || {};
-      let msg = `🎟️ *CUPONS CADASTRADOS*\n\n`;
-      const keys = Object.keys(coupons);
-      if (!keys.length) msg += `_Nenhum cupom cadastrado._`;
-      else {
-        for (const c of keys) {
-          const cup = coupons[c];
-          msg += `*${c}*\n`;
-          msg += `   ${cup.tipo === 'percent' ? cup.valor + '%' : 'R$ ' + cup.valor.toFixed(2)} off`;
-          msg += ` • usos: ${cup.usos || 0}/${cup.maxUsos || '∞'}\n`;
-        }
-      }
-      await answerCallbackQuery(cb.id, '🎟️');
-      await sendTelegramMessage(chatId, msg, { inline_keyboard: [
-        [{ text: '➕ Novo cupom', callback_data: 'coupon_new' }],
-        [{ text: '🔙 Menu', callback_data: 'back' }]
-      ]});
-    }
-    if (data === 'coupon_new') {
-      await answerCallbackQuery(cb.id, '➕');
-      await sendTelegramMessage(chatId,
-        `🎟️ *NOVO CUPOM*\n\nUse um dos comandos:\n\n` +
-        `/cupom_pct <código> <desconto%> [max_usos]\n` +
-        `_Ex:_ \`/cupom_pct PROMO20 20 100\`\n\n` +
-        `/cupom_fix <código> <desconto> [max_usos]\n` +
-        `_Ex:_ \`/cupom_fix BLACK5 5 50\``
-      );
-    }
-
-    // ==== BROADCAST CONFIRMAÇÃO ====
-    if (data === 'broadcast_confirm') {
-      const pending = await redisGet('ASHEO_BROADCAST_PENDING');
-      if (!pending) { await answerCallbackQuery(cb.id, '❌ Expirado'); return res.sendStatus(200); }
-      const keys = await redisKeys();
-      const installIds = new Set();
-      for (const k of keys) { const lic = await redisGet(k); if (lic?.installId) installIds.add(lic.installId); }
-      let enviados = 0;
-      for (const iid of installIds) {
-        await sendTelegramMessage(OWNER_ID, `📢 ${pending.text}`);
-        enviados++;
-      }
-      await redisDel('ASHEO_BROADCAST_PENDING');
-      await logAcao('BROADCAST', { enviados });
-      await answerCallbackQuery(cb.id, `📢 ${enviados}`);
-      await sendTelegramMessage(chatId, `📢 Broadcast enviado para *${enviados}* dispositivos.`);
-    }
-    if (data === 'broadcast_cancel') {
-      await redisDel('ASHEO_BROADCAST_PENDING');
-      await answerCallbackQuery(cb.id, '❌ Cancelado');
-      await sendTelegramMessage(chatId, `❌ Broadcast cancelado.`);
-    }
-
-    // ==== LOGS ====
-    if (data === 'logs') {
-      const logs = await redisGet('ASHEO_LOG') || [];
-      let msg = `📜 *ÚLTIMAS AÇÕES*\n\n`;
-      for (const l of logs.slice(-15).reverse()) {
-        msg += `• \`${l.acao}\` — ${fmtDate(l.at)}\n`;
-      }
-      await answerCallbackQuery(cb.id, '📜');
-      await sendTelegramMessage(chatId, msg);
-    }
-
-    return res.sendStatus(200);
-  }
-
-  // ============ MENSAGENS DE TEXTO ============
-  if (!update.message || !update.message.text) return res.sendStatus(200);
-  const chatId = update.message.chat.id;
-  const args = update.message.text.trim().replace(/\n/g, ' ').split(' ').filter(a => a.length > 0);
-  const cmd = args[0].toLowerCase();
-
-  if (String(chatId) !== String(OWNER_ID)) {
-    await sendTelegramMessage(chatId, '⛔ Sem permissão.');
-    return res.sendStatus(200);
-  }
-
-  try {
-    // ============ BOAS VINDAS ============
-    if (cmd === '/start') {
-      await logAcao('START', {});
-      await sendTelegramMessage(chatId, WELCOME_TEXT);
-    }
-
-    // ============ GERAR ============
-    else if (cmd === '/gerar') {
-      const keyboard = { inline_keyboard: [
-        [{ text: '3 Dias — R$ 2,99',   callback_data: 'buy_3d'  }, { text: '7 Dias — R$ 4,99',   callback_data: 'buy_7d'  }],
-        [{ text: '15 Dias — R$ 7,99',  callback_data: 'buy_15d' }, { text: '30 Dias — R$ 12,99', callback_data: 'buy_30d' }],
-        [{ text: '90 Dias — R$ 29,99', callback_data: 'buy_90d' }, { text: '1 Ano — R$ 79,99',   callback_data: 'buy_365d'}],
-        [{ text: '💎 ILIMITADO — R$ 149,99', callback_data: 'buy_ltd' }],
-        [{ text: '🔙 Voltar', callback_data: 'back' }]
-      ]};
-      await sendTelegramMessage(chatId,
-        `╔══════════════════════════════╗\n║   💰 *TABELA DE PREÇOS*        ║\n╚══════════════════════════════╝\n\nEscolha um plano:`,
-        keyboard
-      );
-    }
-
-    // ============ TRIAL ============
-    else if (cmd === '/trial') {
-      const licenseKey = generateLicenseKey();
-      const lic = { plan: 'premium', days: 7, price: 0, originalPrice: 4.99, label: 'Trial 7 Dias', createdAt: Date.now(), active: true, installId: null, trial: true };
-      await redisSet(licenseKey, lic);
-      await logAcao('TRIAL', { key: licenseKey });
-      await sendTelegramMessage(chatId, `🎁 *Trial 7 dias gerado:*\n\`${licenseKey}\``);
-    }
-
-    // ============ CUPOM PERCENT ============
-    else if (cmd === '/cupom_pct') {
-      const [, code, val, maxU] = args;
-      if (!code || !val) { await sendTelegramMessage(chatId, '⚠️ /cupom_pct <código> <desconto%> [max_usos]'); return res.sendStatus(200); }
-      const coupons = await redisGet('ASHEO_COUPONS') || {};
-      coupons[code.toUpperCase()] = { tipo: 'percent', valor: parseFloat(val), maxUsos: maxU ? parseInt(maxU) : null, usos: 0, createdAt: Date.now() };
-      await redisSet('ASHEO_COUPONS', coupons);
-      await logAcao('CUPOM_CRIAR', { code, tipo: 'percent', valor: val });
-      await sendTelegramMessage(chatId, `✅ Cupom *${code.toUpperCase()}* criado: ${val}% off`);
-    }
-
-    // ============ CUPOM FIXO ============
-    else if (cmd === '/cupom_fix') {
-      const [, code, val, maxU] = args;
-      if (!code || !val) { await sendTelegramMessage(chatId, '⚠️ /cupom_fix <código> <desconto> [max_usos]'); return res.sendStatus(200); }
-      const coupons = await redisGet('ASHEO_COUPONS') || {};
-      coupons[code.toUpperCase()] = { tipo: 'fixed', valor: parseFloat(val), maxUsos: maxU ? parseInt(maxU) : null, usos: 0, createdAt: Date.now() };
-      await redisSet('ASHEO_COUPONS', coupons);
-      await logAcao('CUPOM_CRIAR', { code, tipo: 'fixed', valor: val });
-      await sendTelegramMessage(chatId, `✅ Cupom *${code.toUpperCase()}* criado: R$ ${parseFloat(val).toFixed(2)} off`);
-    }
-
-    // ============ LISTAR CUPONS ============
-    else if (cmd === '/cupons' || cmd === '/cupom_list') {
-      const coupons = await redisGet('ASHEO_COUPONS') || {};
-      const keys = Object.keys(coupons);
-      let msg = `🎟️ *CUPONS* (${keys.length})\n\n`;
-      if (!keys.length) msg += `_Nenhum._`;
-      else for (const c of keys) {
-        const cup = coupons[c];
-        msg += `*${c}* — ${cup.tipo === 'percent' ? cup.valor + '%' : 'R$ ' + cup.valor.toFixed(2)} off`;
-        msg += ` • ${cup.usos || 0}/${cup.maxUsos || '∞'}\n`;
-      }
-      await sendTelegramMessage(chatId, msg, { inline_keyboard: [
-        [{ text: '➕ Novo cupom', callback_data: 'coupon_new' }],
-        [{ text: '🔙 Menu', callback_data: 'back' }]
-      ]});
-    }
-
-    // ============ EXCLUIR CUPOM ============
-    else if (cmd === '/cupom_del') {
-      const code = args[1]?.toUpperCase();
-      if (!code) { await sendTelegramMessage(chatId, '⚠️ /cupom_del <código>'); return res.sendStatus(200); }
-      const coupons = await redisGet('ASHEO_COUPONS') || {};
-      delete coupons[code];
-      await redisSet('ASHEO_COUPONS', coupons);
-      await sendTelegramMessage(chatId, `🗑️ Cupom *${code}* excluído.`);
-    }
-
-    // ============ USAR CUPOM ============
-    else if (cmd === '/usar_cupom') {
-      const [, code, planKey] = args;
-      const plan = PRICES[planKey];
-      if (!plan) { await sendTelegramMessage(chatId, '⚠️ /usar_cupom <código> <plano>'); return res.sendStatus(200); }
-      const coupons = await redisGet('ASHEO_COUPONS') || {};
-      const cupom = coupons[code.toUpperCase()];
-      if (!cupom) { await sendTelegramMessage(chatId, '❌ Cupom inválido.'); return res.sendStatus(200); }
-      if (cupom.maxUsos && cupom.usos >= cupom.maxUsos) { await sendTelegramMessage(chatId, '❌ Cupom esgotado.'); return res.sendStatus(200); }
-      const { preco, desconto } = aplicarCupom(plan.preco, cupom);
-      const licenseKey = generateLicenseKey();
-      const lic = {
-        plan: 'premium', days: plan.dias, price: preco, originalPrice: plan.preco, label: plan.label,
-        cupom: code.toUpperCase(), desconto, createdAt: Date.now(), active: true, installId: null
-      };
-      await redisSet(licenseKey, lic);
-      cupom.usos = (cupom.usos || 0) + 1;
-      await redisSet('ASHEO_COUPONS', coupons);
-      await registrarVenda(licenseKey, lic, code.toUpperCase());
-      await logAcao('VENDA_CUPOM', { key: licenseKey, cupom: code, desconto });
-      await sendTelegramMessage(chatId,
-        `🎟️ *VENDA COM CUPOM*\n\n` +
-        `🔑 \`${licenseKey}\`\n` +
-        `📦 ${plan.label}\n` +
-        `💰 Original: ~~R$ ${plan.preco.toFixed(2)}~~\n` +
-        `🎟️ Cupom: ${code.toUpperCase()} (-R$ ${desconto.toFixed(2)})\n` +
-        `💵 *Total: R$ ${preco.toFixed(2)}*`
-      );
-    }
-
-    // ============ BROADCAST ============
-    else if (cmd === '/broadcast') {
-      const text = args.slice(1).join(' ');
-      if (!text) { await sendTelegramMessage(chatId, '⚠️ /broadcast <mensagem>'); return res.sendStatus(200); }
-      await redisSet('ASHEO_BROADCAST_PENDING', { text, at: Date.now() });
-      const keys = await redisKeys();
-      const installIds = new Set();
-      for (const k of keys) { const lic = await redisGet(k); if (lic?.installId) installIds.add(lic.installId); }
-      await sendTelegramMessage(chatId,
-        `📢 *CONFIRMAR BROADCAST*\n\n"${text}"\n\n*Destinatários:* ${installIds.size} dispositivos`,
-        { inline_keyboard: [
-          [{ text: '✅ ENVIAR', callback_data: 'broadcast_confirm' }],
-          [{ text: '❌ Cancelar', callback_data: 'broadcast_cancel' }]
-        ]}
-      );
-    }
-
-    // ============ EXCLUIR TUDO ============
-    else if (cmd === '/excluirtudo') {
-      const keys = await redisKeys();
-      await sendTelegramMessage(chatId,
-        `🚨 *ATENÇÃO*\n\nVai excluir *${keys.length} licenças* permanentemente.\n*Não pode ser desfeito!*`,
-        { inline_keyboard: [
-          [{ text: '⚠️ SIM, EXCLUIR TUDO', callback_data: 'delall_confirm' }],
-          [{ text: '❌ Cancelar', callback_data: 'back' }]
-        ]}
-      );
-    }
-
-    // ============ LOGS ============
-    else if (cmd === '/logs') {
-      const logs = await redisGet('ASHEO_LOG') || [];
-      let msg = `📜 *LOGS* (${logs.length})\n\n`;
-      for (const l of logs.slice(-20).reverse()) msg += `• \`${l.acao}\` — ${fmtDate(l.at)}\n`;
-      await sendTelegramMessage(chatId, msg);
-    }
-
-    // ============ HELP ============
+    // ========== /ajuda ==========
     else if (cmd === '/ajuda' || cmd === '/help') {
-      await sendTelegramMessage(chatId, buildHelp());
+      await sendAdmin(chatId, buildHelp());
     }
 
     else {
-      await sendTelegramMessage(chatId, '❓ Use /ajuda');
+      await sendAdmin(chatId, '❓ Use /ajuda');
     }
   } catch (err) {
-    console.error('Erro:', err);
-    await sendTelegramMessage(chatId, '❌ Erro interno.');
+    console.error('Erro webhook:', err);
   }
   res.sendStatus(200);
 });
 
-// ============================================================
-//  HELP
-// ============================================================
-function buildHelp() {
-  return `╔══════════════════════════════╗\n║   📚 *COMANDOS*                ║\n╚══════════════════════════════╝\n\n` +
-    `🎫 *LICENÇAS*\n` +
-    `/gerar — Tabela + gerar\n` +
-    `/trial — Trial 7 dias grátis\n` +
-    `/activate <id> <chave> — Vincular\n` +
-    `/desvincular <chave>\n` +
-    `/reset <chave>\n` +
-    `/status <chave>\n` +
-    `/revogar <chave>\n` +
-    `/listar\n` +
-    `/excluir <chave>\n` +
-    `/excluirtudo\n\n` +
-    `🎟️ *CUPONS*\n` +
-    `/cupom_pct <código> <%> [max]\n` +
-    `/cupom_fix <código> <R$> [max]\n` +
-    `/cupons — Listar\n` +
-    `/cupom_del <código>\n` +
-    `/usar_cupom <código> <plano>\n\n` +
-    `📢 *GESTÃO*\n` +
-    `/broadcast <msg> — Massiva\n` +
-    `/estatisticas\n` +
-    `/avisos\n` +
-    `/logs — Auditoria\n` +
-    `/backup\n\n` +
-    `🔗 Dashboard: /dashboard`;
+function buildMenu() {
+  return `╔══════════════════════════════╗\n║   👑 *PAINEL ADMIN*            ║\n╚══════════════════════════════╝\n\n👋 Bem-vindo!\n\n📌 Ações rápidas:\n• /gerar — Tabela + gerar\n• /listar — Ver licenças\n• /estatisticas — Visão geral\n• /ajuda — Todos os comandos`;
 }
 
-// ============================================================
-//  CRON — Aviso automático
-// ============================================================
-setInterval(async () => {
-  try {
-    const keys = await redisKeys();
-    let avisos = [];
-    for (const k of keys) {
-      const lic = await redisGet(k);
-      if (!lic || !lic.active || isExpired(lic) || lic.days === 3650) continue;
-      const d = diasRestantes(lic);
-      if ([7, 3, 1, 0].includes(d)) avisos.push({ key: k, lic, dias: d });
-    }
-    if (avisos.length && OWNER_ID) {
-      let msg = `🚨 *AVISO AUTOMÁTICO*\n\n`;
-      for (const a of avisos) msg += `${statusEmoji(a.lic)} \`${a.key}\` — *${a.dias}d*\n`;
-      await sendTelegramMessage(OWNER_ID, msg);
-    }
-  } catch (e) {}
-}, 6 * 60 * 60 * 1000);
+function buildHelp() {
+  return `📚 *COMANDOS*\n\n🎫 *LICENÇAS*\n/gerar — Tabela + gerar\n/trial — Trial grátis\n/activate <id> <chave>\n/desvincular <chave>\n/reset <chave>\n/status <chave>\n/info <chave>\n/revogar <chave>\n/listar\n/excluir <chave>\n/excluirtudo\n\n🎟️ *CUPONS*\n/cupom_pct <código> <%> [max]\n/cupom_fix <código> <R$> [max]\n/cupons\n/cupom_del <código>\n\n📢 *GESTÃO*\n/broadcast <msg>\n/estatisticas\n/avisos\n/logs\n/backup\n\n🔗 Dashboard: /dashboard`;
+}
 
-// ============================================================
-//  START
-// ============================================================
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Servidor rodando na porta ${PORT}`));
+app.listen(process.env.PORT || 3000, () => console.log('🚀 Servidor na porta ' + (process.env.PORT || 3000)));
