@@ -3,6 +3,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const crypto = require('crypto');
+const fs = require('fs');
 
 const app = express();
 app.use(cors({
@@ -13,51 +14,43 @@ app.use(cors({
 app.options(/.*/, cors());
 app.use(express.json());
 
-// ==== Carrega chave: aceita PEM cru (com \n literais) OU base64 ====
-function loadKey(envVal, label) {
-  if (!envVal) { console.error('⚠️ ' + label + ' NÃO CONFIGURADA'); return null; }
-  // Limpa qualquer whitespace no começo/fim
-  let v = envVal.trim();
-
-  // Se NÃO tem BEGIN, assume base64
-  if (!v.includes('BEGIN')) {
+// ==== Carrega chave de arquivo (Secret Files) ou env var ====
+function loadKeyFromFile(filePath, envVal, label) {
+  // 1) Tenta arquivo primeiro
+  if (fs.existsSync(filePath)) {
     try {
-      // Remove qualquer whitespace/char inválido antes de decodificar
-      const clean = v.replace(/\s+/g, '');
-      const decoded = Buffer.from(clean, 'base64').toString('utf8');
-      if (!decoded.includes('BEGIN')) {
-        console.error('⚠️ ' + label + ' decodificou mas não tem BEGIN');
-        console.error('   Primeiros 40:', decoded.slice(0, 40));
-        return null;
-      }
-      return decoded;
+      const content = fs.readFileSync(filePath, 'utf8');
+      console.log('✅ ' + label + ' carregada do arquivo ' + filePath);
+      return content;
     } catch (e) {
-      console.error('⚠️ ' + label + ' erro base64:', e.message);
-      return null;
+      console.error('⚠️ ' + label + ' erro ao ler arquivo:', e.message);
     }
   }
-  // Tem BEGIN — troca \n literais por quebra de linha real
-  return v.replace(/\\n/g, '\n');
-}
-
-const privateKey = loadKey(process.env.EC_PRIVATE_KEY, 'EC_PRIVATE_KEY');
-const publicKey  = loadKey(process.env.EC_PUBLIC_KEY, 'EC_PUBLIC_KEY');
-
-// ==== LOG DE BOOT ====
-console.log('========== BOOT ==========');
-console.log('EC_PRIVATE_KEY len:', (process.env.EC_PRIVATE_KEY || '').length);
-console.log('privateKey carregada?', !!privateKey);
-if (privateKey) {
-  console.log('privateKey 1ºs 40:', privateKey.slice(0, 40).replace(/\n/g, '\\n'));
-  try {
-    crypto.createPrivateKey(privateKey);
-    console.log('✅ privateKey VÁLIDA');
-  } catch (e) {
-    console.error('❌ privateKey INVÁLIDA:', e.message);
+  // 2) Fallback pra env var
+  if (envVal) {
+    let v = envVal.trim();
+    if (!v.includes('BEGIN')) {
+      try { v = Buffer.from(v, 'base64').toString('utf8'); } catch (e) {}
+    } else {
+      v = v.replace(/\\n/g, '\n');
+    }
+    console.log('✅ ' + label + ' carregada da env var');
+    return v;
   }
-} else {
-  console.error('❌ privateKey NULL — EC_PRIVATE_KEY ausente ou malformada');
+  console.error('❌ ' + label + ' NÃO ENCONTRADA (arquivo nem env var)');
+  return null;
 }
+
+const privateKey = loadKeyFromFile('/etc/secrets/private.pem', process.env.EC_PRIVATE_KEY, 'EC_PRIVATE_KEY');
+const publicKey  = loadKeyFromFile('/etc/secrets/public.pem',  process.env.EC_PUBLIC_KEY,  'EC_PUBLIC_KEY');
+
+console.log('========== BOOT ==========');
+console.log('privateKey existe?', !!privateKey);
+if (privateKey) {
+  try { crypto.createPrivateKey(privateKey); console.log('✅ privateKey VÁLIDA'); }
+  catch (e) { console.error('❌ privateKey INVÁLIDA:', e.message); }
+}
+console.log('publicKey existe?', !!publicKey);
 console.log('==========================');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -65,7 +58,6 @@ const OWNER_ID = process.env.OWNER_ID;
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
-// ==== Redis ====
 async function redisSet(key, value) {
   return (await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
@@ -122,16 +114,14 @@ function generateLicenseToken(installId, plan, days) {
 app.get('/', (req, res) => res.json({ ok: true, ts: Date.now() }));
 app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ==== DEBUG ====
 app.get('/debug-env', (req, res) => {
   res.json({
-    ec_priv_exists: !!process.env.EC_PRIVATE_KEY,
-    ec_priv_len: (process.env.EC_PRIVATE_KEY || '').length,
-    ec_priv_prefix: (process.env.EC_PRIVATE_KEY || '').slice(0, 40),
+    private_file_exists: fs.existsSync('/etc/secrets/private.pem'),
+    public_file_exists: fs.existsSync('/etc/secrets/public.pem'),
     private_key_loaded: !!privateKey,
-    private_key_prefix: privateKey ? privateKey.slice(0, 40).replace(/\n/g, '\\n') : null,
-    ec_pub_exists: !!process.env.EC_PUBLIC_KEY,
     public_key_loaded: !!publicKey,
+    ec_priv_env_exists: !!process.env.EC_PRIVATE_KEY,
+    ec_priv_env_len: (process.env.EC_PRIVATE_KEY || '').length,
     upstash_exists: !!UPSTASH_URL,
     telegram_exists: !!TELEGRAM_TOKEN,
     owner_exists: !!OWNER_ID
@@ -143,7 +133,7 @@ app.post('/v1/activate', async (req, res) => {
     const { installId, licenseKey } = req.body || {};
     if (!installId) return res.status(400).json({ error: 'missing_installId' });
     if (!licenseKey) return res.status(400).json({ error: 'missing_licenseKey' });
-    if (!privateKey) return res.status(500).json({ error: 'no_private_key', message: 'EC_PRIVATE_KEY ausente/inválida' });
+    if (!privateKey) return res.status(500).json({ error: 'no_private_key', message: 'private.pem ausente' });
 
     const lic = await redisGet(licenseKey);
     if (!lic) return res.status(401).json({ error: 'invalid_license' });
