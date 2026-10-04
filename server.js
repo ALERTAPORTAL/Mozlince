@@ -5,26 +5,50 @@ const cors = require('cors');
 const crypto = require('crypto');
 
 const app = express();
+
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: [
+    'Content-Type', 'Authorization',
+    'x-asheo-install', 'x-asheo-ts', 'x-asheo-sig',
+    'x-asheo-build', 'x-asheo-nonce'
+  ]
 }));
 app.options(/.*/, cors());
 app.use(express.json());
 
-const privateKey = process.env.EC_PRIVATE_KEY.replace(/\\n/g, '\n');
-const publicKey = process.env.EC_PUBLIC_KEY.replace(/\\n/g, '\n');
+// ==== loadKey: aceita PEM cru (com \n) ou base64 ====
+function loadKey(envVal) {
+  if (!envVal) return null;
+  if (!envVal.includes('BEGIN')) {
+    try {
+      return Buffer.from(envVal, 'base64').toString('utf8');
+    } catch (e) {
+      console.error('Erro decodificando base64:', e);
+      return null;
+    }
+  }
+  return envVal.replace(/\\n/g, '\n');
+}
+
+const privateKey = loadKey(process.env.EC_PRIVATE_KEY);
+const publicKey  = loadKey(process.env.EC_PUBLIC_KEY);
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 
+if (!privateKey) console.error('⚠️  EC_PRIVATE_KEY não configurada');
+if (!publicKey)  console.error('⚠️  EC_PUBLIC_KEY não configurada');
+if (!UPSTASH_URL) console.error('⚠️  UPSTASH_REDIS_REST_URL não configurada');
+
+// ==== Redis (Upstash) ====
 async function redisSet(key, value) {
-  const res = await fetch(`${UPSTASH_URL}/set/${key}`, {
+  const res = await fetch(`${UPSTASH_URL}/set/${encodeURIComponent(key)}`, {
     method: 'POST',
-    headers: { 
+    headers: {
       Authorization: `Bearer ${UPSTASH_TOKEN}`,
       'Content-Type': 'application/json'
     },
@@ -34,11 +58,12 @@ async function redisSet(key, value) {
 }
 
 async function redisGet(key) {
-  const res = await fetch(`${UPSTASH_URL}/get/${key}`, {
+  const res = await fetch(`${UPSTASH_URL}/get/${encodeURIComponent(key)}`, {
     headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` }
   });
   const data = await res.json();
-  return data.result ? JSON.parse(data.result) : null;
+  if (!data.result) return null;
+  try { return JSON.parse(data.result); } catch { return data.result; }
 }
 
 async function redisKeys() {
@@ -49,6 +74,7 @@ async function redisKeys() {
   return data.result || [];
 }
 
+// ==== Utils ====
 function generateLicenseKey() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const block = () => {
@@ -80,6 +106,7 @@ async function answerCallbackQuery(callbackQueryId, text) {
 }
 
 function generateLicenseToken(installId, plan, days) {
+  const now = Math.floor(Date.now() / 1000);
   const payload = {
     sub: installId,
     installId: installId,
@@ -98,56 +125,92 @@ function generateLicenseToken(installId, plan, days) {
       api_access: true
     },
     secret: 'segredo-' + installId,
-    exp: Math.floor(Date.now() / 1000) + (days * 24 * 60 * 60)
+    iat: now,
+    nbf: now - 5,
+    exp: now + (days * 24 * 60 * 60)
   };
   return jwt.sign(payload, privateKey, { algorithm: 'ES256' });
 }
 
-app.post('/activate', async (req, res) => {
-  const { installId, licenseKey } = req.body;
-  if (!installId) return res.status(400).json({ erro: 'installId é obrigatório' });
+// ==== Health ====
+app.get('/', (req, res) => {
+  res.json({ ok: true, service: 'mozlince-license', status: 'live', ts: Date.now() });
+});
+app.get('/health', (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-  if (licenseKey) {
+// ==== /v1/activate (oficial) ====
+app.post('/v1/activate', async (req, res) => {
+  try {
+    const { installId, licenseKey } = req.body || {};
+    if (!installId) return res.status(400).json({ error: 'missing_installId' });
+    if (!licenseKey) return res.status(400).json({ error: 'missing_licenseKey' });
+
     const lic = await redisGet(licenseKey);
-    if (!lic) return res.status(404).json({ erro: 'Chave de licença inválida' });
-    if (!lic.active) return res.status(403).json({ erro: 'Licença revogada' });
+    if (!lic) return res.status(401).json({ error: 'invalid_license' });
+    if (!lic.active) return res.status(403).json({ error: 'revoked' });
 
     if (!lic.installId) {
       lic.installId = installId;
       await redisSet(licenseKey, JSON.stringify(lic));
     } else if (lic.installId !== installId) {
-      return res.status(403).json({ erro: 'Chave já usada em outro dispositivo' });
+      return res.status(403).json({ error: 'seat_taken', installId: lic.installId });
     }
 
     const expDate = lic.createdAt + lic.days * 24 * 60 * 60 * 1000;
-    if (Date.now() > expDate) return res.status(403).json({ erro: 'Licença expirada' });
+    if (Date.now() > expDate) return res.status(403).json({ error: 'expired' });
 
     const token = generateLicenseToken(installId, lic.plan, lic.days);
-    return res.json({
+    console.log(`[activate] installId=${installId} plan=${lic.plan} days=${lic.days}`);
+
+    res.json({
       token,
-      licenseKey,
+      tier: lic.plan,
+      seat: 1,
+      seats: 1,
+      gwPass: null,
       secret: 'segredo-' + installId,
       status: 'active',
       plan: lic.plan,
-      days: lic.days,
-      features: { advanced_automation: true, multi_account: true, cloud_sync: true, priority_support: true, custom_export: true, api_access: true }
+      days: lic.days
     });
+  } catch (e) {
+    console.error('[activate] ERRO:', e);
+    res.status(500).json({ error: 'internal', message: e.message });
   }
-
-  const newKey = generateLicenseKey();
-  const token = generateLicenseToken(installId, 'premium', 30);
-  await redisSet(newKey, JSON.stringify({ installId, plan: 'premium', days: 30, createdAt: Date.now(), active: true }));
-  res.json({
-    token,
-    licenseKey: newKey,
-    secret: 'segredo-' + installId,
-    status: 'active',
-    plan: 'premium',
-    days: 30,
-    features: { advanced_automation: true, multi_account: true, cloud_sync: true, priority_support: true, custom_export: true, api_access: true }
-  });
 });
 
+// ==== /v1/deactivate ====
+app.post('/v1/deactivate', (req, res) => res.json({ ok: true }));
+
+// ==== /activate (legado) ====
+app.post('/activate', async (req, res) => {
+  const { installId, licenseKey } = req.body;
+  if (!installId) return res.status(400).json({ erro: 'installId é obrigatório' });
+  if (!licenseKey) return res.status(400).json({ erro: 'licenseKey é obrigatório' });
+
+  const lic = await redisGet(licenseKey);
+  if (!lic) return res.status(404).json({ erro: 'Chave inválida' });
+  if (!lic.active) return res.status(403).json({ erro: 'Revogada' });
+  if (lic.installId && lic.installId !== installId) return res.status(403).json({ erro: 'Já usada' });
+  if (!lic.installId) { lic.installId = installId; await redisSet(licenseKey, JSON.stringify(lic)); }
+
+  const token = generateLicenseToken(installId, lic.plan, lic.days);
+  res.json({ token, licenseKey, secret: 'segredo-' + installId, status: 'active', plan: lic.plan, days: lic.days });
+});
+
+// ==== /verificar-licenca ====
+app.post('/verificar-licenca', (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ erro: 'Token obrigatório' });
+  try {
+    const decoded = jwt.verify(token, publicKey, { algorithms: ['ES256'] });
+    res.json({ valido: true, dados: decoded });
+  } catch (err) {
+    res.status(401).json({ valido: false, erro: err.message });
+  }
+});
+
+// ==== Telegram webhook ====
 app.post('/telegram-webhook', async (req, res) => {
   const update = req.body;
 
@@ -155,31 +218,19 @@ app.post('/telegram-webhook', async (req, res) => {
     const cb = update.callback_query;
     const chatId = cb.message.chat.id;
     const data = cb.data;
-
     if (String(chatId) !== String(OWNER_ID)) {
       await answerCallbackQuery(cb.id, '⛔ Sem permissão.');
       return res.sendStatus(200);
     }
-
     if (data.startsWith('dur_')) {
-      const parts = data.split('_');
-      const days = parseInt(parts[1]);
+      const days = parseInt(data.split('_')[1]);
       const licenseKey = generateLicenseKey();
-      
-      await redisSet(licenseKey, JSON.stringify({ 
-        plan: 'premium', 
-        days: days, 
-        createdAt: Date.now(), 
-        active: true, 
-        installId: null 
+      await redisSet(licenseKey, JSON.stringify({
+        plan: 'premium', days, createdAt: Date.now(), active: true, installId: null
       }));
-      
       await answerCallbackQuery(cb.id, `Licença gerada!`);
       await sendTelegramMessage(chatId,
-        `✅ *Licença gerada!*\n\n` +
-        `*Chave:* \`${licenseKey}\`\n` +
-        `*Duração:* ${days === 3650 ? 'Ilimitada' : days + ' dias'}\n\n` +
-        `Use a chave acima na extensão.`
+        `✅ *Licença gerada!*\n\n*Chave:* \`${licenseKey}\`\n*Duração:* ${days === 3650 ? 'Ilimitada' : days + ' dias'}`
       );
     }
     return res.sendStatus(200);
@@ -187,11 +238,7 @@ app.post('/telegram-webhook', async (req, res) => {
 
   if (!update.message || !update.message.text) return res.sendStatus(200);
   const chatId = update.message.chat.id;
-  const text = update.message.text.trim();
-  
-  // Remove quebras de linha e junta tudo com espaço
-  const cleanText = text.replace(/\n/g, ' ');
-  const args = cleanText.split(' ').filter(a => a.length > 0);
+  const args = update.message.text.trim().replace(/\n/g, ' ').split(' ').filter(a => a.length > 0);
   const command = args[0].toLowerCase();
 
   if (String(chatId) !== String(OWNER_ID)) {
@@ -202,70 +249,40 @@ app.post('/telegram-webhook', async (req, res) => {
   try {
     if (command === '/start') {
       await sendTelegramMessage(chatId,
-        `👋 *Bem-vindo!*\n\n` +
-        `/gerar - Gera licença\n` +
-        `/activate <installId> <chave> - Vincula chave ao Install ID\n` +
-        `/status <chave> - Verifica status\n` +
-        `/revogar <chave> - Revoga\n` +
-        `/listar - Lista todas`
+        `👋 *Bem-vindo!*\n\n/gerar - Gera licença\n/activate <installId> <chave>\n/status <chave>\n/revogar <chave>\n/listar`
       );
     } else if (command === '/gerar') {
-      const keyboard = {
-        inline_keyboard: [
-          [{ text: '3 Dias', callback_data: `dur_3` }, { text: '7 Dias', callback_data: `dur_7` }],
-          [{ text: '30 Dias', callback_data: `dur_30` }, { text: 'Ilimitado', callback_data: `dur_3650` }]
-        ]
-      };
+      const keyboard = { inline_keyboard: [
+        [{ text: '3 Dias', callback_data: 'dur_3' }, { text: '7 Dias', callback_data: 'dur_7' }],
+        [{ text: '30 Dias', callback_data: 'dur_30' }, { text: 'Ilimitado', callback_data: 'dur_3650' }]
+      ]};
       await sendTelegramMessage(chatId, `📅 *Escolha a duração:*`, keyboard);
     } else if (command === '/activate') {
-      // Pega a última palavra como chave e junta o resto como Install ID
       const licenseKey = args[args.length - 1];
       const installId = args.slice(1, args.length - 1).join(' ');
-
-      if (!installId || !licenseKey) {
-        await sendTelegramMessage(chatId, '⚠️ Use: `/activate <installId> <chave>`\n\nExemplo:\n`/activate 37a52b3d-cef4-4a6a-98d9-772104c89d04 ASHEO-XXXX-XXXX-XXXX-XXXX`');
-        return res.sendStatus(200);
-      }
-
+      if (!installId || !licenseKey) { await sendTelegramMessage(chatId, '⚠️ Use: /activate <installId> <chave>'); return res.sendStatus(200); }
       const lic = await redisGet(licenseKey);
-      if (!lic) {
-        await sendTelegramMessage(chatId, `❌ Chave \`${licenseKey}\` não encontrada.`);
-        return res.sendStatus(200);
-      }
-      if (lic.installId) {
-        await sendTelegramMessage(chatId, `⚠️ Chave \`${licenseKey}\` já está vinculada a outro Install ID.`);
-        return res.sendStatus(200);
-      }
-
+      if (!lic) { await sendTelegramMessage(chatId, `❌ Chave não encontrada.`); return res.sendStatus(200); }
+      if (lic.installId) { await sendTelegramMessage(chatId, `⚠️ Já vinculada.`); return res.sendStatus(200); }
       lic.installId = installId;
       await redisSet(licenseKey, JSON.stringify(lic));
-      await sendTelegramMessage(chatId,
-        `✅ *Chave vinculada com sucesso!*\n\n` +
-        `*Chave:* \`${licenseKey}\`\n` +
-        `*Install ID:* \`${installId}\`\n\n` +
-        `Agora a extensão pode ser ativada.`
-      );
+      await sendTelegramMessage(chatId, `✅ Chave vinculada a \`${installId}\`.`);
     } else if (command === '/status') {
       const key = args[1];
       if (!key) { await sendTelegramMessage(chatId, '⚠️ Use: /status <chave>'); return res.sendStatus(200); }
       const lic = await redisGet(key);
       if (lic) {
         const expDate = new Date(lic.createdAt + lic.days * 24 * 60 * 60 * 1000);
-        const expFormatted = expDate.toLocaleString('pt-BR');
         await sendTelegramMessage(chatId,
-          `📋 *Status*\n*Chave:* \`${key}\`\n*Install ID:* \`${lic.installId || 'não vinculado'}\`\n` +
-          `*Duração:* ${lic.days === 3650 ? 'Ilimitada' : lic.days + ' dias'}\n*Expira:* ${expFormatted}\n*Ativa:* ${lic.active ? 'Sim' : 'Não'}`
+          `📋 *Status*\n*Chave:* \`${key}\`\n*Install:* \`${lic.installId || 'não vinculado'}\`\n*Duração:* ${lic.days === 3650 ? 'Ilimitada' : lic.days + ' dias'}\n*Expira:* ${expDate.toLocaleString('pt-BR')}\n*Ativa:* ${lic.active ? 'Sim' : 'Não'}`
         );
-      } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${key}\`.`); }
+      } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença.`); }
     } else if (command === '/revogar') {
       const key = args[1];
       if (!key) { await sendTelegramMessage(chatId, '⚠️ Use: /revogar <chave>'); return res.sendStatus(200); }
       const lic = await redisGet(key);
-      if (lic) {
-        lic.active = false;
-        await redisSet(key, JSON.stringify(lic));
-        await sendTelegramMessage(chatId, `🗑️ Licença \`${key}\` revogada.`);
-      } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${key}\`.`); }
+      if (lic) { lic.active = false; await redisSet(key, JSON.stringify(lic)); await sendTelegramMessage(chatId, `🗑️ Revogada.`); }
+      else { await sendTelegramMessage(chatId, `❌ Nenhuma licença.`); }
     } else if (command === '/listar') {
       const keys = await redisKeys();
       if (keys.length === 0) { await sendTelegramMessage(chatId, '📭 Nenhuma licença.'); }
@@ -273,10 +290,7 @@ app.post('/telegram-webhook', async (req, res) => {
         let msg = `📋 *Licenças (${keys.length})*\n\n`;
         for (const key of keys) {
           const lic = await redisGet(key);
-          if (lic) {
-            const expDate = new Date(lic.createdAt + lic.days * 24 * 60 * 60 * 1000);
-            msg += `• \`${key}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'} - ${lic.active ? 'Ativa' : 'Revogada'} - Expira: ${expDate.toLocaleDateString('pt-BR')}\n`;
-          }
+          if (lic) msg += `• \`${key}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'} - ${lic.active ? 'Ativa' : 'Revogada'}\n`;
         }
         await sendTelegramMessage(chatId, msg);
       }
@@ -285,17 +299,5 @@ app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-app.post('/verificar-licenca', (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ erro: 'Token é obrigatório' });
-  try {
-    const decoded = jwt.verify(token, publicKey, { algorithms: ['ES256'] });
-    res.json({ valido: true, dados: decoded });
-  } catch (err) {
-    res.status(401).json({ valido: false, erro: err.message });
-  }
-});
-
-
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => { console.log(`Servidor rodando na porta ${PORT}`); });
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
