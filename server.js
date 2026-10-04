@@ -5,12 +5,7 @@ const cors = require('cors');
 const crypto = require('crypto');
 
 const app = express();
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
-app.options(/.*/, cors());
+app.use(cors());
 app.use(express.json());
 
 const privateKey = process.env.EC_PRIVATE_KEY.replace(/\\n/g, '\n');
@@ -79,16 +74,15 @@ async function answerCallbackQuery(callbackQueryId, text) {
   });
 }
 
+// Função que gera o token com TODOS os campos que a extensão espera
 function generateLicenseToken(installId, plan, days) {
   const payload = {
-    sub: installId,
     installId: installId,
     status: 'active',
     plan: plan,
-    planDisplayName: plan === 'premium' ? 'Premium' : 'Free',
     active: true,
     tier: plan,
-    kind: plan === 'premium' ? 'premium' : 'free',
+    // Features (recursos avançados)
     features: {
       advanced_automation: true,
       multi_account: true,
@@ -97,6 +91,23 @@ function generateLicenseToken(installId, plan, days) {
       custom_export: true,
       api_access: true
     },
+    // Capabilities (capacidades especiais)
+    capabilities: {
+      bulk_actions: true,
+      advanced_analytics: true,
+      custom_webhooks: true
+    },
+    // Limits (limites do plano)
+    limits: {
+      max_accounts: Infinity,
+      daily_actions: Infinity,
+      max_templates: Infinity,
+      history_days: Infinity,
+      export_limit: Infinity
+    },
+    // Campos extras
+    isPremium: true,
+    isVerified: true,
     secret: 'segredo-' + installId,
     exp: Math.floor(Date.now() / 1000) + (days * 24 * 60 * 60)
   };
@@ -130,7 +141,26 @@ app.post('/activate', async (req, res) => {
       status: 'active',
       plan: lic.plan,
       days: lic.days,
-      features: { advanced_automation: true, multi_account: true, cloud_sync: true, priority_support: true, custom_export: true, api_access: true }
+      features: {
+        advanced_automation: true,
+        multi_account: true,
+        cloud_sync: true,
+        priority_support: true,
+        custom_export: true,
+        api_access: true
+      },
+      capabilities: {
+        bulk_actions: true,
+        advanced_analytics: true,
+        custom_webhooks: true
+      },
+      limits: {
+        max_accounts: Infinity,
+        daily_actions: Infinity,
+        max_templates: Infinity,
+        history_days: Infinity,
+        export_limit: Infinity
+      }
     });
   }
 
@@ -144,7 +174,26 @@ app.post('/activate', async (req, res) => {
     status: 'active',
     plan: 'premium',
     days: 30,
-    features: { advanced_automation: true, multi_account: true, cloud_sync: true, priority_support: true, custom_export: true, api_access: true }
+    features: {
+      advanced_automation: true,
+      multi_account: true,
+      cloud_sync: true,
+      priority_support: true,
+      custom_export: true,
+      api_access: true
+    },
+    capabilities: {
+      bulk_actions: true,
+      advanced_analytics: true,
+      custom_webhooks: true
+    },
+    limits: {
+      max_accounts: Infinity,
+      daily_actions: Infinity,
+      max_templates: Infinity,
+      history_days: Infinity,
+      export_limit: Infinity
+    }
   });
 });
 
@@ -188,8 +237,6 @@ app.post('/telegram-webhook', async (req, res) => {
   if (!update.message || !update.message.text) return res.sendStatus(200);
   const chatId = update.message.chat.id;
   const text = update.message.text.trim();
-  
-  // Remove quebras de linha e junta tudo com espaço
   const cleanText = text.replace(/\n/g, ' ');
   const args = cleanText.split(' ').filter(a => a.length > 0);
   const command = args[0].toLowerCase();
@@ -204,7 +251,7 @@ app.post('/telegram-webhook', async (req, res) => {
       await sendTelegramMessage(chatId,
         `👋 *Bem-vindo!*\n\n` +
         `/gerar - Gera licença\n` +
-        `/activate <installId> <chave> - Vincula chave ao Install ID\n` +
+        `/activate <installId> <chave> - Vincula chave\n` +
         `/status <chave> - Verifica status\n` +
         `/revogar <chave> - Revoga\n` +
         `/listar - Lista todas`
@@ -218,12 +265,11 @@ app.post('/telegram-webhook', async (req, res) => {
       };
       await sendTelegramMessage(chatId, `📅 *Escolha a duração:*`, keyboard);
     } else if (command === '/activate') {
-      // Pega a última palavra como chave e junta o resto como Install ID
       const licenseKey = args[args.length - 1];
       const installId = args.slice(1, args.length - 1).join(' ');
 
       if (!installId || !licenseKey) {
-        await sendTelegramMessage(chatId, '⚠️ Use: `/activate <installId> <chave>`\n\nExemplo:\n`/activate 37a52b3d-cef4-4a6a-98d9-772104c89d04 ASHEO-XXXX-XXXX-XXXX-XXXX`');
+        await sendTelegramMessage(chatId, '⚠️ Use: `/activate <installId> <chave>`');
         return res.sendStatus(200);
       }
 
@@ -233,7 +279,7 @@ app.post('/telegram-webhook', async (req, res) => {
         return res.sendStatus(200);
       }
       if (lic.installId) {
-        await sendTelegramMessage(chatId, `⚠️ Chave \`${licenseKey}\` já está vinculada a outro Install ID.`);
+        await sendTelegramMessage(chatId, `⚠️ Chave já vinculada a outro Install ID.`);
         return res.sendStatus(200);
       }
 
@@ -251,12 +297,11 @@ app.post('/telegram-webhook', async (req, res) => {
       const lic = await redisGet(key);
       if (lic) {
         const expDate = new Date(lic.createdAt + lic.days * 24 * 60 * 60 * 1000);
-        const expFormatted = expDate.toLocaleString('pt-BR');
         await sendTelegramMessage(chatId,
           `📋 *Status*\n*Chave:* \`${key}\`\n*Install ID:* \`${lic.installId || 'não vinculado'}\`\n` +
-          `*Duração:* ${lic.days === 3650 ? 'Ilimitada' : lic.days + ' dias'}\n*Expira:* ${expFormatted}\n*Ativa:* ${lic.active ? 'Sim' : 'Não'}`
+          `*Duração:* ${lic.days === 3650 ? 'Ilimitada' : lic.days + ' dias'}\n*Expira:* ${expDate.toLocaleString('pt-BR')}\n*Ativa:* ${lic.active ? 'Sim' : 'Não'}`
         );
-      } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${key}\`.`); }
+      } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença.`); }
     } else if (command === '/revogar') {
       const key = args[1];
       if (!key) { await sendTelegramMessage(chatId, '⚠️ Use: /revogar <chave>'); return res.sendStatus(200); }
@@ -264,8 +309,8 @@ app.post('/telegram-webhook', async (req, res) => {
       if (lic) {
         lic.active = false;
         await redisSet(key, JSON.stringify(lic));
-        await sendTelegramMessage(chatId, `🗑️ Licença \`${key}\` revogada.`);
-      } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença para \`${key}\`.`); }
+        await sendTelegramMessage(chatId, `🗑️ Licença revogada.`);
+      } else { await sendTelegramMessage(chatId, `❌ Nenhuma licença.`); }
     } else if (command === '/listar') {
       const keys = await redisKeys();
       if (keys.length === 0) { await sendTelegramMessage(chatId, '📭 Nenhuma licença.'); }
@@ -273,10 +318,7 @@ app.post('/telegram-webhook', async (req, res) => {
         let msg = `📋 *Licenças (${keys.length})*\n\n`;
         for (const key of keys) {
           const lic = await redisGet(key);
-          if (lic) {
-            const expDate = new Date(lic.createdAt + lic.days * 24 * 60 * 60 * 1000);
-            msg += `• \`${key}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'} - ${lic.active ? 'Ativa' : 'Revogada'} - Expira: ${expDate.toLocaleDateString('pt-BR')}\n`;
-          }
+          if (lic) msg += `• \`${key}\` - ${lic.days === 3650 ? 'Ilimitado' : lic.days + 'd'} - ${lic.active ? 'Ativa' : 'Revogada'}\n`;
         }
         await sendTelegramMessage(chatId, msg);
       }
@@ -295,7 +337,6 @@ app.post('/verificar-licenca', (req, res) => {
     res.status(401).json({ valido: false, erro: err.message });
   }
 });
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => { console.log(`Servidor rodando na porta ${PORT}`); });
