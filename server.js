@@ -1,13 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════
-   ⚡ MOZLINCE NEBULA PREMIUM v8.0
-   © Asheo Systems
-   ✨ Fixes:
-      • Bug "Never" no 3 dias — lifetime explícito sempre
-      • Suporte interativo funcionando (2 vias)
-      • Deletar tudo / deletar uma
-      • Boas-vindas após ativação (Congratulations)
-      • Tradutor PT/EN com seleção manual
-      • Chave não exposta em respostas públicas
+   ✦ MOZLINCE NEBULA  ·  v8.1 AURORA
+   © Asheo Systems · Premium License Engine
+   ───────────────────────────────────────────────────────────────
+   ◈ Fixes v8.1
+     ▸ Expiração REAL — JWT usa expiraEm original (nunca renova)
+     ▸ Data exata retornada à extensão (expiresAt + expiresIn)
+     ▸ Tradução TOTAL PT/EN — menus, botões, stats, erros
+     ▸ Layout premium unificado — cores, ícones, cards
+     ▸ 3d/7d/15d… agora expiram de verdade no horário exato
    ═══════════════════════════════════════════════════════════════ */
 require('dotenv').config();
 const express = require('express');
@@ -23,32 +23,46 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS);
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Request-Id');
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.0');
+  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.1');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 app.use(express.json({ limit: '512kb' }));
 
-/* ── Logger ── */
-const C = { r:'\x1b[0m', b:'\x1b[1m', gray:'\x1b[38;5;245m',
-  cyan:'\x1b[38;5;51m', purple:'\x1b[38;5;141m', gold:'\x1b[38;5;220m',
-  green:'\x1b[38;5;46m', red:'\x1b[38;5;196m', orange:'\x1b[38;5;208m',
-  blue:'\x1b[38;5;39m', pink:'\x1b[38;5;213m', mint:'\x1b[38;5;121m' };
-const TAGS = { INFO:C.cyan, OK:C.green, WARN:C.orange, ERRO:C.red, SYS:C.purple,
-  ATIV:C.blue, BOT:C.cyan, FEAT:C.pink, BOOT:C.mint, API:C.gold,
-  DBG:C.gray, TG:C.cyan, SUPPORT:C.gold, I18N:C.blue };
+/* ═══════════════════════════════════════════════
+   ◈ DESIGN SYSTEM — paleta premium unificada
+   ═══════════════════════════════════════════════ */
+const C = {
+  r:'\x1b[0m', b:'\x1b[1m', d:'\x1b[2m',
+  gray:'\x1b[38;5;245m', dim:'\x1b[38;5;240m',
+  violet:'\x1b[38;5;99m',  violetB:'\x1b[38;5;135m',
+  cyan:'\x1b[38;5;45m',    cyanB:'\x1b[38;5;51m',
+  gold:'\x1b[38;5;220m',   goldB:'\x1b[38;5;226m',
+  mint:'\x1b[38;5;121m',   green:'\x1b[38;5;46m',
+  rose:'\x1b[38;5;204m',   red:'\x1b[38;5;196m',
+  amber:'\x1b[38;5;214m',  blue:'\x1b[38;5;39m'
+};
+const TAGS = {
+  INFO:C.cyanB,  OK:C.green,   WARN:C.amber,  ERRO:C.red,
+  SYS:C.violetB, ATIV:C.blue,  BOT:C.cyanB,   FEAT:C.rose,
+  BOOT:C.mint,   API:C.gold,   DBG:C.dim,     TG:C.cyanB,
+  SUPPORT:C.gold, I18N:C.blue
+};
 function log(t, m) {
   const ts = new Date().toISOString().replace('T',' ').substring(0,19);
-  console.log(`${C.gray}${ts}${C.r} ${TAGS[t]||C.gray}${C.b}▸ ${t.padEnd(7)}${C.r} ${m}`);
+  const tag = (TAGS[t]||C.gray) + C.b + '▸ ' + t.padEnd(7) + C.r;
+  console.log(`${C.dim}${ts}${C.r} ${tag} ${m}`);
 }
 function banner() {
-  console.log(`\n${C.purple}╔══════════════════════════════════════════════════════════╗${C.r}`);
-  console.log(`${C.purple}║${C.r}  ${C.cyan}${C.b}⚡ MOZLINCE${C.r} ${C.gold}${C.b}NEBULA PREMIUM${C.r} · v${C.gold}8.0${C.r}                ${C.purple}║${C.r}`);
-  console.log(`${C.purple}║${C.r}  ${C.gray}License Engine · Asheo Systems${C.r}                     ${C.purple}║${C.r}`);
-  console.log(`${C.purple}╚══════════════════════════════════════════════════════════╝${C.r}\n`);
+  console.log(`\n${C.violet}   ╭──────────────────────────────────────────────╮${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.1${C.r}  ${C.dim}AURORA${C.r}     ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · Asheo Systems${C.r}     ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   ╰──────────────────────────────────────────────╯${C.r}\n`);
 }
 
-/* ── Chaves ES256 ── */
+/* ═══════════════════════════════════════════════
+   ◈ CHAVES ES256
+   ═══════════════════════════════════════════════ */
 let PRIVATE_KEY = null, PUBLIC_KEY = null, ORIGEM = 'nenhuma';
 (function initKeys() {
   const fp = ['/etc/secrets/private.pem','./private.pem','/etc/secrets/ec_private.pem'];
@@ -75,10 +89,10 @@ let PRIVATE_KEY = null, PUBLIC_KEY = null, ORIGEM = 'nenhuma';
       const k = crypto.createPrivateKey(PRIVATE_KEY);
       const jwk = crypto.createPublicKey(k).export({ format:'jwk' });
       if (!PUBLIC_KEY) PUBLIC_KEY = crypto.createPublicKey(k).export({ type:'spki', format:'pem' });
-      log('OK', `Chave privada OK (${ORIGEM})`);
+      log('OK', `Chave privada carregada (${ORIGEM})`);
       if (jwk.x === 'aTAr_kSTrfocOkpAHlVSDc71E1pc5Pd5KgnE-ggBr_4' && jwk.y === 'GFrU897XAPvrxqcRhlwoAwpooKHl69-0YrBaJbfwAT4') {
-        log('OK', '✅ Chave CORRESPONDE à extensão Mozlince!');
-      } else { log('WARN', '⚠️ Chave diferente da extensão'); }
+        log('OK', '✔ Chave corresponde à extensão Mozlince');
+      } else { log('WARN', '⚠ Chave diferente da extensão'); }
     } catch (e) { log('ERRO','Chave inválida: '+e.message); PRIVATE_KEY = null; }
   } else { log('ERRO','Nenhuma chave privada encontrada'); }
 })();
@@ -89,7 +103,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
 /* ═══════════════════════════════════════════════
-   FEATURES / LIMITS / SCOPE
+   ◈ FEATURES / LIMITS / SCOPE
    ═══════════════════════════════════════════════ */
 const PREMIUM_FEATURES = {
   browser_mods:{enabled:true,label:'Browser Mods',description:'Spoof fingerprint and rotate user-agent.'},
@@ -117,7 +131,7 @@ const mapFeatures    = on => Object.fromEntries(Object.entries(PREMIUM_FEATURES)
 const mapCapabilities= on => Object.fromEntries(Object.entries(PREMIUM_CAPABILITIES).map(([k,v])=>[k,on?v.enabled:false]));
 
 /* ═══════════════════════════════════════════════
-   REDIS
+   ◈ REDIS
    ═══════════════════════════════════════════════ */
 function normalizeKey(k){ if(!k||typeof k!=='string')return ''; return k.trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9\-]/g,''); }
 async function redisSet(key, value) {
@@ -149,23 +163,23 @@ async function redisKeys(pattern='ASHEO-*') {
 }
 
 /* ═══════════════════════════════════════════════
-   PLANOS (USD)
+   ◈ PLANOS (USD)
    ═══════════════════════════════════════════════ */
 const PACOTES = {
-  '3d':   { nome:'3 Dias',    dias:3,     preco:3,   emoji:'🥉', lifetime:false },
-  '7d':   { nome:'7 Dias',    dias:7,     preco:5,   emoji:'🥈', lifetime:false },
-  '15d':  { nome:'15 Dias',   dias:15,    preco:7,   emoji:'🥇', lifetime:false },
-  '30d':  { nome:'30 Dias',   dias:30,    preco:12,  emoji:'💎', lifetime:false },
-  '45d':  { nome:'45 Dias',   dias:45,    preco:17,  emoji:'🔷', lifetime:false },
-  '90d':  { nome:'3 Meses',   dias:90,    preco:30,  emoji:'👑', lifetime:false },
-  '180d': { nome:'6 Meses',   dias:180,   preco:45,  emoji:'⚜️', lifetime:false },
-  '1a':   { nome:'1 Ano',     dias:365,   preco:70,  emoji:'🏆', lifetime:false },
-  'life': { nome:'LIFETIME',  dias:36500, preco:190, emoji:'🔥', lifetime:true  }
+  '3d':   { nome:'3 Dias',    dias:3,     preco:3,   emoji:'◔', lifetime:false },
+  '7d':   { nome:'7 Dias',    dias:7,     preco:5,   emoji:'◕', lifetime:false },
+  '15d':  { nome:'15 Dias',   dias:15,    preco:7,   emoji:'◑', lifetime:false },
+  '30d':  { nome:'30 Dias',   dias:30,    preco:12,  emoji:'◒', lifetime:false },
+  '45d':  { nome:'45 Dias',   dias:45,    preco:17,  emoji:'◓', lifetime:false },
+  '90d':  { nome:'3 Meses',   dias:90,    preco:30,  emoji:'✦', lifetime:false },
+  '180d': { nome:'6 Meses',   dias:180,   preco:45,  emoji:'✧', lifetime:false },
+  '1a':   { nome:'1 Ano',     dias:365,   preco:70,  emoji:'⟡', lifetime:false },
+  'life': { nome:'LIFETIME',  dias:36500, preco:190, emoji:'∞', lifetime:true  }
 };
 const precoFmt = usd => `$${Number(usd).toFixed(2)}`;
 
 /* ═══════════════════════════════════════════════
-   MIGRAÇÃO — lifetime SEMPRE explícito
+   ◈ MIGRAÇÃO — lifetime explícito, expiraEm preservado
    ═══════════════════════════════════════════════ */
 function migrarLicenca(lic) {
   if (!lic || typeof lic !== 'object') return lic;
@@ -176,14 +190,14 @@ function migrarLicenca(lic) {
   if (!n.planoNome) n.planoNome = pk ? pk.nome : 'Premium';
   if (typeof n.dias !== 'number') n.dias = pk ? pk.dias : 30;
 
-  // ⚡ v8: lifetime é SEMPRE derivado do plano (nunca do campo antigo ilimitada)
-  // Se o plano é 'life' → lifetime true. Senão → false. SEMPRE.
   n.lifetime = n.plano === 'life';
-  n.ilimitada = n.lifetime; // campo legado (compat)
+  n.ilimitada = n.lifetime;
 
   if (!n.criadaEm && n.createdAt) n.criadaEm = n.createdAt;
   if (!n.criadaEm) n.criadaEm = Date.now();
-  if (!n.expiraEm || (n.lifetime && n.expiraEm < Date.now() + 50*365*24*60*60*1000)) {
+
+  // ⚡ v8.1 — SEMPRE recalcula se ausente OU se lifetime (fix para licenças antigas)
+  if (!n.expiraEm || (typeof n.expiraEm !== 'number')) {
     n.expiraEm = n.lifetime
       ? n.criadaEm + (100 * 365 * 24 * 60 * 60 * 1000)
       : n.criadaEm + (n.dias * 24 * 60 * 60 * 1000);
@@ -197,19 +211,28 @@ function migrarLicenca(lic) {
 }
 
 /* ═══════════════════════════════════════════════
-   JWT
+   ◈ JWT — exp baseado em expiraEm ORIGINAL
    ═══════════════════════════════════════════════ */
 function buildClaims(installId, lic) {
   const now = Math.floor(Date.now()/1000);
   const isLife = lic && lic.plano === 'life';
-  const days = lic && lic.dias ? lic.dias : 30;
-  const exp = isLife ? now + (100*365*24*60*60) : now + (days*24*60*60);
+
+  // ⚡ v8.1 — CRÍTICO: usa expiraEm ORIGINAL, não now+dias
+  // Isto garante que o token NUNCA é estendido por reativação.
+  const exp = isLife
+    ? now + (100 * 365 * 24 * 60 * 60)
+    : Math.floor((lic.expiraEm || (lic.criadaEm + lic.dias*86400000)) / 1000);
+
   return {
     sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId,
     plan:'premium', planDisplayName:'Premium', tier:'premium', kind:'premium',
     status:'active', active:true, isPremium:true, isVerified:true,
     source:'premium', sourceType:'server', isFounder:true,
-    lifetime: isLife, plano: lic.plano,
+    lifetime: isLife,
+    plano: lic.plano,
+    licenseKey: lic.chave,
+    issuedAt: lic.criadaEm,
+    expiresAt: lic.expiraEm,   // data real da chave (ms)
     scope: PREMIUM_SCOPE,
     features: mapFeatures(true), capabilities: mapCapabilities(true),
     limits:{...PREMIUM_LIMITS},
@@ -220,15 +243,16 @@ function buildClaims(installId, lic) {
 function signToken(claims){ if(!PRIVATE_KEY)throw new Error('Chave privada nao inicializada'); return jwt.sign(claims, PRIVATE_KEY, { algorithm:'ES256' }); }
 function formatDate(ts){ if(!ts)return 'Nunca'; return new Date(ts).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function humanTime(ms){
-  if(ms<=0)return '❌ Expirada';
+  if(ms<=0)return '✕ expirada';
   const s=Math.floor(ms/1000), d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60);
   if(d>0)return `${d}d ${h}h ${m}m`;
   if(h>0)return `${h}h ${m}m`;
   return `${m}m`;
 }
 function progressBar(pct, size=10){
-  const cheio=Math.round(pct*size/100);
-  return '█'.repeat(Math.max(0,cheio))+'░'.repeat(Math.max(0,size-cheio));
+  pct = Math.max(0, Math.min(100, pct));
+  const cheio = Math.round(pct*size/100);
+  return '▰'.repeat(cheio) + '▱'.repeat(size-cheio);
 }
 function generateLicenseKey(){
   const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -243,7 +267,7 @@ function validateBearer(req){
 }
 
 /* ═══════════════════════════════════════════════
-   GATEWAYS · RULES · CAMPAIGNS
+   ◈ GATEWAYS · RULES · CAMPAIGNS
    ═══════════════════════════════════════════════ */
 const GATEWAYS=[
   {id:'default-stripe',name:'Stripe',pattern:'https://js.stripe.com/*',enabled:true,isDefault:true},
@@ -260,54 +284,202 @@ const RULES=[
 const CAMPAIGNS=[{id:'default-1',name:'Default Campaign',enabled:true,createdAt:new Date().toISOString()}];
 
 /* ═══════════════════════════════════════════════
-   I18N — PT/EN
+   ◈ I18N — Tradução TOTAL
    ═══════════════════════════════════════════════ */
 const T = {
   pt: {
+    // Menu principal
+    menu_title:'⌬  PAINEL DE CONTROLE',
+    menu_sub:'Selecione uma operação abaixo',
+    online:'online', secure:'seguro',
+    // Botões do menu
+    btn_generate:'⚡  Gerar Licença',
+    btn_mykeys:'◈  Minhas Chaves',
+    btn_stats:'◧  Estatísticas',
+    btn_link:'⟡  Vincular',
+    btn_unlink:'⌬  Desvincular',
+    btn_query:'◉  Consultar',
+    btn_prices:'✦  Tabela de Preços',
+    btn_support:'✆  Suporte',
+    btn_lang:'◐  Idioma / Language',
+    btn_help:'?  Ajuda',
+    btn_danger:'⚠  Zona de Perigo',
+    btn_back:'‹  Voltar',
+    btn_menu:'‹  Menu',
+    btn_refresh:'↻  Atualizar',
+    btn_cancel:'✕  Cancelar',
+    btn_confirm_yes:'✓  Sim, confirmar',
+    btn_confirm_no:'✕  Cancelar',
+    // Welcome (não-owner)
     welcome_title:'Bem-vindo ao Mozlince Nebula',
-    welcome_desc:'Se deseja adquirir uma licença, clique abaixo:',
-    contact:'📞 CONTACTAR SUPORTE',
-    support_title:'📞 SUPORTE',
-    support_write:'✍️ Escreva sua mensagem agora:',
+    welcome_desc:'Para adquirir uma licença premium, clique abaixo:',
+    contact:'✆  CONTACTAR SUPORTE',
+    // Suporte
+    support_title:'✆  Suporte',
+    support_write:'Escreva sua mensagem agora:',
     support_hint:'(o próximo texto será encaminhado ao suporte)',
     support_exp:'Sessão expira em 10 minutos',
-    support_sent:'✅ MENSAGEM ENVIADA',
-    support_sent_desc:'Sua mensagem foi encaminhada ao suporte.\n⏱️ Tempo de resposta: até 24h',
-    support_cancel:'❌ Cancelar',
-    support_cancelled:'❌ Suporte cancelado',
-    cancel:'cancelar',
-    menu:'🔙 Menu',
-    congrats:'🎉 PARABÉNS!',
-    congrats_desc:'Sua licença foi ativada com sucesso!\n\n💎 Aproveite todos os recursos Premium.',
-    lang_select:'🌐 Escolha seu idioma / Choose your language:',
-    lang_saved:'✅ Idioma salvo',
-    back:'🔙 Voltar'
+    support_sent:'✓  MENSAGEM ENVIADA',
+    support_sent_desc:'Sua mensagem foi encaminhada.\nTempo de resposta: até 24h',
+    support_cancelled:'✕  Suporte cancelado',
+    // Gerar
+    gen_title:'⚡  Gerar Licença',
+    gen_sub:'Escolha um plano abaixo:',
+    gen_success:'✓  LICENÇA EMITIDA',
+    gen_key:'Chave',
+    gen_plan:'Plano',
+    gen_price:'Preço',
+    gen_issued:'Emitida',
+    gen_expires:'Expira',
+    gen_duration:'Duração',
+    gen_lifetime:'Lifetime',
+    gen_never:'Nunca',
+    gen_yes:'Sim',
+    gen_no:'Não',
+    // Listar
+    list_title:'◈  Minhas Licenças',
+    list_empty:'Nenhuma licença cadastrada.',
+    list_more:'+{n} ocultas',
+    // Stats
+    stats_title:'◧  Estatísticas',
+    stats_total:'Total',
+    stats_active:'Ativas',
+    stats_expired:'Expiradas',
+    stats_linked:'Vinculadas',
+    stats_lifetime:'Lifetime',
+    stats_revenue:'Receita',
+    stats_rate:'Taxa ativa',
+    // Detalhes
+    detail_title:'◉  Detalhes da Licença',
+    detail_key:'Chave',
+    detail_status:'Status',
+    detail_active:'● Ativa',
+    detail_revoked:'○ Revogada',
+    detail_install:'Install ID',
+    detail_not_linked:'não vinculada',
+    detail_remaining:'Restante',
+    // Ações
+    act_link:'⟡ Vincular',
+    act_unlink:'⌬ Desvincular',
+    act_revoke:'✕ Revogar',
+    act_delete:'✕ Deletar',
+    // Preços
+    prices_title:'✦  Tabela de Preços',
+    prices_currency:'USD (Dólar Americano)',
+    // Ajuda
+    help_title:'?  Central de Ajuda',
+    help_cmds:'Comandos disponíveis',
+    // Perigo
+    danger_title:'⚠  Zona de Perigo',
+    danger_warn:'Ações irreversíveis',
+    danger_del_active:'Deletar apenas ativas',
+    danger_del_all:'Deletar TODAS as licenças',
+    danger_confirm_active:'Deletar todas as licenças <b>ativas</b>?',
+    danger_confirm_all:'⚠ DELETAR TODAS as licenças? Esta ação é irreversível.',
+    danger_done:'{n} licenças removidas.',
+    // Lang
+    lang_select:'Escolha seu idioma / Choose your language:',
+    lang_saved:'✓ Idioma atualizado',
+    // Estado
+    status_active:'● Ativa',
+    status_revoked:'○ Revogada',
+    status_expired:'✕ Expirada',
+    expired_msg:'Esta licença expirou. Renove para continuar.'
   },
   en: {
+    menu_title:'⌬  CONTROL PANEL',
+    menu_sub:'Select an operation below',
+    online:'online', secure:'secure',
+    btn_generate:'⚡  Generate License',
+    btn_mykeys:'◈  My Keys',
+    btn_stats:'◧  Statistics',
+    btn_link:'⟡  Link',
+    btn_unlink:'⌬  Unlink',
+    btn_query:'◉  Query',
+    btn_prices:'✦  Price List',
+    btn_support:'✆  Support',
+    btn_lang:'◐  Language / Idioma',
+    btn_help:'?  Help',
+    btn_danger:'⚠  Danger Zone',
+    btn_back:'‹  Back',
+    btn_menu:'‹  Menu',
+    btn_refresh:'↻  Refresh',
+    btn_cancel:'✕  Cancel',
+    btn_confirm_yes:'✓  Yes, confirm',
+    btn_confirm_no:'✕  Cancel',
     welcome_title:'Welcome to Mozlince Nebula',
-    welcome_desc:'If you wish to purchase a license, click below:',
-    contact:'📞 CONTACT SUPPORT',
-    support_title:'📞 SUPPORT',
-    support_write:'✍️ Write your message now:',
+    welcome_desc:'To purchase a premium license, click below:',
+    contact:'✆  CONTACT SUPPORT',
+    support_title:'✆  Support',
+    support_write:'Write your message now:',
     support_hint:'(the next text will be forwarded to support)',
     support_exp:'Session expires in 10 minutes',
-    support_sent:'✅ MESSAGE SENT',
-    support_sent_desc:'Your message was forwarded to support.\n⏱️ Response time: up to 24h',
-    support_cancel:'❌ Cancel',
-    support_cancelled:'❌ Support cancelled',
-    cancel:'cancel',
-    menu:'🔙 Menu',
-    congrats:'🎉 CONGRATULATIONS!',
-    congrats_desc:'Your license was successfully activated!\n\n💎 Enjoy all Premium features.',
-    lang_select:'🌐 Choose your language:',
-    lang_saved:'✅ Language saved',
-    back:'🔙 Back'
+    support_sent:'✓  MESSAGE SENT',
+    support_sent_desc:'Your message was forwarded.\nResponse time: up to 24h',
+    support_cancelled:'✕  Support cancelled',
+    gen_title:'⚡  Generate License',
+    gen_sub:'Choose a plan below:',
+    gen_success:'✓  LICENSE ISSUED',
+    gen_key:'Key',
+    gen_plan:'Plan',
+    gen_price:'Price',
+    gen_issued:'Issued',
+    gen_expires:'Expires',
+    gen_duration:'Duration',
+    gen_lifetime:'Lifetime',
+    gen_never:'Never',
+    gen_yes:'Yes',
+    gen_no:'No',
+    list_title:'◈  My Licenses',
+    list_empty:'No licenses found.',
+    list_more:'+{n} hidden',
+    stats_title:'◧  Statistics',
+    stats_total:'Total',
+    stats_active:'Active',
+    stats_expired:'Expired',
+    stats_linked:'Linked',
+    stats_lifetime:'Lifetime',
+    stats_revenue:'Revenue',
+    stats_rate:'Active rate',
+    detail_title:'◉  License Details',
+    detail_key:'Key',
+    detail_status:'Status',
+    detail_active:'● Active',
+    detail_revoked:'○ Revoked',
+    detail_install:'Install ID',
+    detail_not_linked:'not linked',
+    detail_remaining:'Remaining',
+    act_link:'⟡ Link',
+    act_unlink:'⌬ Unlink',
+    act_revoke:'✕ Revoke',
+    act_delete:'✕ Delete',
+    prices_title:'✦  Price List',
+    prices_currency:'USD (US Dollar)',
+    help_title:'?  Help Center',
+    help_cmds:'Available commands',
+    danger_title:'⚠  Danger Zone',
+    danger_warn:'Irreversible actions',
+    danger_del_active:'Delete active only',
+    danger_del_all:'Delete ALL licenses',
+    danger_confirm_active:'Delete all <b>active</b> licenses?',
+    danger_confirm_all:'⚠ DELETE ALL licenses? This action is irreversible.',
+    danger_done:'{n} licenses removed.',
+    lang_select:'Choose your language / Escolha seu idioma:',
+    lang_saved:'✓ Language updated',
+    status_active:'● Active',
+    status_revoked:'○ Revoked',
+    status_expired:'✕ Expired',
+    expired_msg:'This license expired. Renew to continue.'
   }
 };
-function t(lang, key) { return (T[lang] || T.pt)[key] || T.pt[key] || key; }
+function t(lang, key, vars={}) {
+  let s = (T[lang] || T.pt)[key] || T.pt[key] || key;
+  for (const k in vars) s = s.replace(`{${k}}`, vars[k]);
+  return s;
+}
 
 /* ═══════════════════════════════════════════════
-   TELEGRAM — helpers + sessões
+   ◈ TELEGRAM · SESSÕES
    ═══════════════════════════════════════════════ */
 const SUPPORT_SESSIONS = new Map();
 const USER_LANG = new Map();
@@ -335,37 +507,47 @@ async function tgAnswer(id, text='') {
   try { await fetch(`${TG_API}/answerCallbackQuery`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({callback_query_id:id,text})}); } catch {}
 }
 
-/* ── Layout ── */
+/* ── Layout helpers ── */
 const UI = {
-  header: () =>
-    `<b>╭━━━━『 ⚡ <i>MOZLINCE NEBULA</i> ⚡ 』━━━━╮</b>\n` +
-    `<b>┃</b>   <i>Premium License Engine</i>   <b>┃</b>\n` +
-    `<b>┃</b>  <code>v8.0 · Asheo Systems</code>  <b>┃</b>\n` +
-    `<b>╰━━━━━━━━━━━━━━━━━━━━━━━━╯</b>`,
-  div: '━'.repeat(22)
+  header: (lang='pt') => {
+    const subtitle = lang === 'en' ? 'Premium License Engine' : 'Motor de Licenças Premium';
+    return `<b>⌬ ───────────────────── ⌬</b>\n` +
+           `<b>◈  MOZLINCE NEBULA  v8.1</b>\n` +
+           `<i>${subtitle} · Asheo Systems</i>\n` +
+           `<b>⌬ ───────────────────── ⌬</b>`;
+  },
+  sep: '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
+  card: (title, body) =>
+    `<b>◈ ──『 ${title} 』── ◈</b>\n` +
+    `<code>${UI.sep}</code>\n` +
+    body,
+  kv: (icon, label, value) => `<b>${icon}</b>  <b>${label}:</b>  ${value}`
 };
 
+/* ═══════════════════════════════════════════════
+   ◈ MENU PRINCIPAL (TRADUZIDO)
+   ═══════════════════════════════════════════════ */
 function menuPrincipal(lang='pt') {
   const hora = new Date().toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' });
   return {
     texto:
-`${UI.header()}
+`${UI.header(lang)}
 
-<b>🎛️ PAINEL DE CONTROLE</b>
-<code>${UI.div}</code>
-<b>🕐</b> ${hora}  <b>🌐</b> Online  <b>🔐</b> ES256
-<code>${UI.div}</code>
+<b>${t(lang,'menu_title')}</b>
+<code>${UI.sep}</code>
+<b>◔</b> ${hora}   <b>◉</b> ${t(lang,'online')}   <b>⟡</b> ${t(lang,'secure')} ES256
+<code>${UI.sep}</code>
 
-<i>Selecione uma operação:</i>`,
+<i>${t(lang,'menu_sub')}</i>`,
     teclado: { inline_keyboard: [
-      [{ text:'⚡  Gerar Licença  ⚡', callback_data:'m_gerar' }],
-      [{ text:'📋 Minhas Chaves', callback_data:'m_listar' }, { text:'📊 Estatísticas', callback_data:'m_stats' }],
-      [{ text:'🔗 Vincular', callback_data:'m_vincular' }, { text:'🔓 Desvincular', callback_data:'m_desvincular' }],
-      [{ text:'🔍 Consultar', callback_data:'m_consultar' }],
-      [{ text:'💰  Tabela de Preços  💰', callback_data:'m_precos' }],
-      [{ text:'📞  Suporte  📞', callback_data:'m_contacto' }],
-      [{ text:'🌐 Idioma / Language', callback_data:'m_lang' }],
-      [{ text:'ℹ️ Ajuda', callback_data:'m_ajuda' }, { text:'⚠️ Zona de Perigo', callback_data:'m_perigo' }]
+      [{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }],
+      [{ text: t(lang,'btn_mykeys'), callback_data:'m_listar' }, { text: t(lang,'btn_stats'), callback_data:'m_stats' }],
+      [{ text: t(lang,'btn_link'), callback_data:'m_vincular' }, { text: t(lang,'btn_unlink'), callback_data:'m_desvincular' }],
+      [{ text: t(lang,'btn_query'), callback_data:'m_consultar' }],
+      [{ text: t(lang,'btn_prices'), callback_data:'m_precos' }],
+      [{ text: t(lang,'btn_support'), callback_data:'m_contacto' }],
+      [{ text: t(lang,'btn_lang'), callback_data:'m_lang' }],
+      [{ text: t(lang,'btn_help'), callback_data:'m_ajuda' }, { text: t(lang,'btn_danger'), callback_data:'m_perigo' }]
     ]}
   };
 }
@@ -378,20 +560,20 @@ async function cmdStart(chatId, msgId=null) {
 }
 
 /* ═══════════════════════════════════════════════
-   CALLBACK HANDLER
+   ◈ CALLBACK HANDLER
    ═══════════════════════════════════════════════ */
 async function handleCallback(cb) {
   const chatId = cb.message.chat.id, msgId = cb.message.message_id, data = cb.data, userId = String(cb.from.id);
   const isOwner = userId === String(OWNER_ID);
   const lang = USER_LANG.get(String(chatId)) || 'pt';
 
-  /* ── Idioma (todos podem usar) ── */
+  /* ── Idioma ── */
   if (data === 'm_lang') {
     await tgAnswer(cb.id);
-    const texto = `${UI.header()}\n\n<b>${t(lang,'lang_select')}</b>\n<code>${UI.div}</code>`;
+    const texto = `${UI.header(lang)}\n\n<b>◐  ${t(lang,'lang_select')}</b>\n<code>${UI.sep}</code>`;
     const kb = { inline_keyboard: [
-      [{ text:'🇧🇷 Português', callback_data:'lang_pt' }, { text:'🇺🇸 English', callback_data:'lang_en' }],
-      [{ text: t(lang,'back'), callback_data:'m_home' }]
+      [{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }],
+      [{ text: t(lang,'btn_back'), callback_data:'m_home' }]
     ]};
     await tgEdit(chatId, msgId, texto, kb);
     return;
@@ -400,49 +582,50 @@ async function handleCallback(cb) {
     const novo = data === 'lang_pt' ? 'pt' : 'en';
     USER_LANG.set(String(chatId), novo);
     await tgAnswer(cb.id, t(novo,'lang_saved'));
-    // Regenera menu no novo idioma
     const m = menuPrincipal(novo);
     await tgEdit(chatId, msgId, m.texto, m.teclado);
     return;
   }
 
-  /* ── Não-owner: suporte / idioma / boas-vindas ── */
+  /* ── Não-owner ── */
   if (!isOwner) {
     if (data === 'm_contacto') {
       SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() });
-      await tgAnswer(cb.id, '📝');
+      await tgAnswer(cb.id, '✎');
       await tgEdit(chatId, msgId,
-`<b>${t(lang,'support_title')}</b>
-<code>${UI.div}</code>
+`${UI.header(lang)}
 
-${t(lang,'support_write')}
+<b>${t(lang,'support_title')}</b>
+<code>${UI.sep}</code>
+
+<b>✎</b> ${t(lang,'support_write')}
 <i>${t(lang,'support_hint')}</i>
 
-<code>${UI.div}</code>
-⏱️ ${t(lang,'support_exp')}`,
-        { inline_keyboard: [[{ text: t(lang,'support_cancel'), callback_data:'m_cancelar_suporte' }]] });
+<code>${UI.sep}</code>
+<b>◔</b> ${t(lang,'support_exp')}`,
+        { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] });
       return;
     }
     if (data === 'm_cancelar_suporte') {
       SUPPORT_SESSIONS.delete(String(chatId));
-      await tgAnswer(cb.id, '❌');
+      await tgAnswer(cb.id, '✕');
       await tgEdit(chatId, msgId,
-`<b>${t(lang,'support_cancelled')}</b>
-
-${t(lang,'welcome_desc')}`,
+`<b>${t(lang,'support_cancelled')}</b>\n\n<i>${t(lang,'welcome_desc')}</i>`,
         { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }]] });
       return;
     }
     if (data === 'm_home') {
       await tgAnswer(cb.id);
       await tgEdit(chatId, msgId,
-`<b>👋 ${t(lang,'welcome_title')}</b>
-<code>${UI.div}</code>
+`${UI.header(lang)}
+
+<b>◈  ${t(lang,'welcome_title')}</b>
+<code>${UI.sep}</code>
 
 <i>${t(lang,'welcome_desc')}</i>`,
         { inline_keyboard: [
           [{ text: t(lang,'contact'), callback_data:'m_contacto' }],
-          [{ text:'🌐 Idioma / Language', callback_data:'m_lang' }]
+          [{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]
         ]});
       return;
     }
@@ -456,7 +639,7 @@ ${t(lang,'welcome_desc')}`,
 
     /* ── GERAR ── */
     if (data === 'm_gerar') {
-      await tgAnswer(cb.id, '💰');
+      await tgAnswer(cb.id, '⚡');
       const kb = { inline_keyboard: [] };
       const entries = Object.entries(PACOTES);
       for (let i = 0; i < entries.length; i += 2) {
@@ -464,18 +647,23 @@ ${t(lang,'welcome_desc')}`,
         if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` });
         kb.inline_keyboard.push(linha);
       }
-      kb.inline_keyboard.push([{ text:'🔙 Voltar', callback_data:'m_home' }]);
+      kb.inline_keyboard.push([{ text: t(lang,'btn_back'), callback_data:'m_home' }]);
 
       let tabela = '';
-      for (const [,p] of Object.entries(PACOTES)) tabela += `${p.emoji} <b>${p.nome.padEnd(10)}</b>  <code>${precoFmt(p.preco)}</code>\n`;
+      for (const [,p] of Object.entries(PACOTES)) {
+        const dur = p.lifetime ? '∞' : `${p.dias}d`;
+        tabela += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>  <i>${dur}</i>\n`;
+      }
 
       await tgEdit(chatId, msgId,
-`<b>╭──『 ⚡ GERAR LICENÇA 』──╮</b>
-<code>${UI.div}</code>
-<i>Selecione o plano:</i>
+`${UI.header(lang)}
+
+<b>${t(lang,'gen_title')}</b>
+<code>${UI.sep}</code>
+<i>${t(lang,'gen_sub')}</i>
 
 ${tabela}
-<code>${UI.div}</code>`,
+<code>${UI.sep}</code>`,
         kb);
       return;
     }
@@ -483,11 +671,10 @@ ${tabela}
     /* ── Gerar chave ── */
     if (data.startsWith('g_')) {
       const pk = data.substring(2), p = PACOTES[pk];
-      if (!p) { await tgAnswer(cb.id, '❌'); return; }
+      if (!p) { await tgAnswer(cb.id, '✕'); return; }
       const chave = generateLicenseKey();
       const agora = Date.now();
       const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
-      // ⚡ v8: lifetime SEMPRE explícito — corrige bug do Never
       await redisSet(chave, JSON.stringify({
         chave, plano: pk, planoNome: p.nome,
         preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco),
@@ -499,66 +686,64 @@ ${tabela}
         v: 8
       }));
       log('OK', `Chave ${pk} gerada: ${chave}`);
-      await tgAnswer(cb.id, '🎉');
+      await tgAnswer(cb.id, '✓');
 
-      const restaTxt = p.lifetime ? '∞ LIFETIME' : humanTime(p.dias*24*60*60*1000);
-      const barra = p.lifetime ? '██████████' : progressBar(100);
+      const restaTxt = p.lifetime ? '∞  LIFETIME' : humanTime(p.dias*24*60*60*1000);
+      const barra = p.lifetime ? '▰▰▰▰▰▰▰▰▰▰' : progressBar(100);
 
       await tgEdit(chatId, msgId,
-`<b>🎉 ${t('pt','congrats')}</b>
-<code>${UI.div}</code>
-<i>Licença gerada com sucesso!</i>
-<code>${UI.div}</code>
+`${UI.header(lang)}
 
-<b>🔑 Chave:</b>
+<b>${t(lang,'gen_success')}</b>
+<code>${UI.sep}</code>
+
+<b>⌬  ${t(lang,'gen_key')}</b>
 <code>${chave}</code>
 
-<code>${UI.div}</code>
-<b>${p.emoji}  Plano:</b>    ${p.nome}
-<b>💰  Preço:</b>    <code>${precoFmt(p.preco)}</code>
-<b>📅  Emitida:</b>  ${formatDate(agora)}
-<b>⏰  Expira:</b>   ${p.lifetime ? 'Nunca' : formatDate(expira)}
-<b>⌛  Duração:</b>  ${restaTxt}
-<b>🔥  Lifetime:</b> ${p.lifetime ? '✅ Sim' : '❌ Não'}
-<code>${UI.div}</code>
-<b>${barra}</b>`,
+<code>${UI.sep}</code>
+${UI.kv(p.emoji, t(lang,'gen_plan'), `<b>${p.nome}</b>`)}
+${UI.kv('◆', t(lang,'gen_price'), `<code>${precoFmt(p.preco)}</code>`)}
+${UI.kv('◔', t(lang,'gen_issued'), formatDate(agora))}
+${UI.kv('◕', t(lang,'gen_expires'), p.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(expira))}
+${UI.kv('⟡', t(lang,'gen_duration'), `<b>${restaTxt}</b>`)}
+${UI.kv('∞', t(lang,'gen_lifetime'), p.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`)}
+<code>${UI.sep}</code>
+<code>${barra}</code>`,
         { inline_keyboard: [
-          [{ text:'🔍 Ver Detalhes', callback_data:`c_${chave}` }],
-          [{ text:'🔙 Menu Principal', callback_data:'m_home' }]
+          [{ text: t(lang,'btn_query'), callback_data:`c_${chave}` }],
+          [{ text: t(lang,'btn_menu'), callback_data:'m_home' }]
         ]});
       return;
     }
 
     /* ── LISTAR ── */
     if (data === 'm_listar') {
-      await tgAnswer(cb.id, '📋');
+      await tgAnswer(cb.id, '◈');
       const keys = await redisKeys('ASHEO-*');
       if (keys.length === 0) {
         await tgEdit(chatId, msgId,
-`<b>📋 MINHAS LICENÇAS</b>
-<code>${UI.div}</code>
-<i>Nenhuma licença cadastrada.</i>`,
-          { inline_keyboard: [[{ text:'⚡ Gerar', callback_data:'m_gerar' }],[{ text:'🔙', callback_data:'m_home' }]] });
+`${UI.header(lang)}\n\n<b>${t(lang,'list_title')}</b>\n<code>${UI.sep}</code>\n<i>${t(lang,'list_empty')}</i>`,
+          { inline_keyboard: [[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] });
         return;
       }
-      let txt = `<b>📋 MINHAS LICENÇAS</b>  <code>(${keys.length})</code>\n<code>${UI.div}</code>\n\n`;
+      let txt = `<b>${t(lang,'list_title')}</b>  <code>(${keys.length})</code>\n<code>${UI.sep}</code>\n\n`;
       const inlineKb = [];
       for (let i = 0; i < Math.min(keys.length, 15); i++) {
         const l = await redisGet(keys[i]); if (!l) continue;
         const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now());
-        const emoji = l.lifetime ? '🔥' : (l.ativa ? '🟢' : '🔴');
-        txt += `${emoji}${l.installId?'🔗':'⚪'} <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n\n`;
-        inlineKb.push([{ text:`⚙️ ${keys[i].substring(0,18)}…`, callback_data:`c_${keys[i]}` }]);
+        const emoji = l.lifetime ? '∞' : (l.ativa ? '●' : '○');
+        txt += `<b>${emoji}</b> ${l.installId?'⟡':'○'} <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n\n`;
+        inlineKb.push([{ text:`▸ ${keys[i].substring(0,18)}…`, callback_data:`c_${keys[i]}` }]);
       }
-      if (keys.length > 15) txt += `<i>… +${keys.length-15} ocultas</i>\n`;
-      inlineKb.push([{ text:'🔄 Atualizar', callback_data:'m_listar' }, { text:'🔙 Voltar', callback_data:'m_home' }]);
+      if (keys.length > 15) txt += `<i>${t(lang,'list_more',{n:keys.length-15})}</i>\n`;
+      inlineKb.push([{ text: t(lang,'btn_refresh'), callback_data:'m_listar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]);
       await tgEdit(chatId, msgId, txt, { inline_keyboard: inlineKb });
       return;
     }
 
     /* ── STATS ── */
     if (data === 'm_stats') {
-      await tgAnswer(cb.id, '📊');
+      await tgAnswer(cb.id, '◧');
       const keys = await redisKeys('ASHEO-*');
       let ativas=0, expiradas=0, vinc=0, life=0, receita=0;
       for (const k of keys) {
@@ -571,68 +756,75 @@ ${tabela}
       }
       const taxa = keys.length ? Math.round((ativas/keys.length)*100) : 0;
       await tgEdit(chatId, msgId,
-`<b>╭──『 📊 ESTATÍSTICAS 』──╮</b>
-<code>${UI.div}</code>
+`${UI.header(lang)}
 
-<b>🔑  Total:</b>      <code>${keys.length}</code>
-<b>🟢  Ativas:</b>     <code>${ativas}</code>
-<b>🔴  Expiradas:</b>  <code>${expiradas}</code>
-<b>🔗  Vinculadas:</b> <code>${vinc}</code>
-<b>🔥  Lifetime:</b>   <code>${life}</code>
+<b>${t(lang,'stats_title')}</b>
+<code>${UI.sep}</code>
 
-<code>${UI.div}</code>
-<b>💰  Receita:</b> <code>${precoFmt(receita)}</code>
-<b>📈  Taxa ativa:</b> ${taxa}%
+${UI.kv('◈', t(lang,'stats_total'),    `<code>${keys.length}</code>`)}
+${UI.kv('●', t(lang,'stats_active'),   `<code>${ativas}</code>`)}
+${UI.kv('○', t(lang,'stats_expired'),  `<code>${expiradas}</code>`)}
+${UI.kv('⟡', t(lang,'stats_linked'),   `<code>${vinc}</code>`)}
+${UI.kv('∞', t(lang,'stats_lifetime'), `<code>${life}</code>`)}
+
+<code>${UI.sep}</code>
+${UI.kv('◆', t(lang,'stats_revenue'), `<code>${precoFmt(receita)}</code>`)}
+${UI.kv('◔', t(lang,'stats_rate'),    `<b>${taxa}%</b>`)}
 <code>${progressBar(taxa, 15)}</code>`,
         { inline_keyboard: [
-          [{ text:'🔄 Atualizar', callback_data:'m_stats' }, { text:'🔙 Voltar', callback_data:'m_home' }]
+          [{ text: t(lang,'btn_refresh'), callback_data:'m_stats' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]
         ]});
       return;
     }
 
     /* ── VINC / DESVINC / CONSULTAR ── */
     if (data === 'm_vincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `<b>🔗 VINCULAR</b>\n<code>${UI.div}</code>\n<code>/activate &lt;installId&gt; &lt;chave&gt;</code>`,
-      { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:'m_home' }]] }); }
+      `${UI.header(lang)}\n\n<b>${t(lang,'act_link')}</b>\n<code>${UI.sep}</code>\n<code>/activate &lt;installId&gt; &lt;chave&gt;</code>`,
+      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
     if (data === 'm_desvincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `<b>🔓 DESVINCULAR</b>\n<code>${UI.div}</code>\n<code>/desvincular &lt;chave&gt;</code>`,
-      { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:'m_home' }]] }); }
+      `${UI.header(lang)}\n\n<b>${t(lang,'act_unlink')}</b>\n<code>${UI.sep}</code>\n<code>/desvincular &lt;chave&gt;</code>`,
+      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
     if (data === 'm_consultar') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `<b>🔍 CONSULTAR</b>\n<code>${UI.div}</code>\n<code>/status &lt;chave&gt;</code>`,
-      { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:'m_home' }]] }); }
+      `${UI.header(lang)}\n\n<b>${t(lang,'btn_query')}</b>\n<code>${UI.sep}</code>\n<code>/status &lt;chave&gt;</code>`,
+      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
 
     /* ── PREÇOS ── */
     if (data === 'm_precos') {
       await tgAnswer(cb.id);
-      let txt = `<b>╭──『 💰 TABELA DE PREÇOS 』──╮</b>\n<code>${UI.div}</code>\n\n`;
-      for (const [,p] of Object.entries(PACOTES)) txt += `${p.emoji}  <b>${p.nome.padEnd(11)}</b>  →  <code>${precoFmt(p.preco)}</code>\n`;
-      txt += `\n<code>${UI.div}</code>\n💵 <i>USD (Dólar Americano)</i>`;
+      let txt = `${UI.header(lang)}\n\n<b>${t(lang,'prices_title')}</b>\n<code>${UI.sep}</code>\n\n`;
+      for (const [,p] of Object.entries(PACOTES)) {
+        const dur = p.lifetime ? '∞' : `${p.dias} dias`;
+        txt += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>\n      <i>${dur}</i>\n`;
+      }
+      txt += `\n<code>${UI.sep}</code>\n<i>◆ ${t(lang,'prices_currency')}</i>`;
       await tgEdit(chatId, msgId, txt, { inline_keyboard: [
-        [{ text:'📞 Suporte', callback_data:'m_contacto' }],
-        [{ text:'⚡ Gerar', callback_data:'m_gerar' }, { text:'🔙 Voltar', callback_data:'m_home' }]
+        [{ text: t(lang,'btn_support'), callback_data:'m_contacto' }],
+        [{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]
       ]});
       return;
     }
 
     /* ── SUPORTE ── */
     if (data === 'm_contacto') {
-      await tgAnswer(cb.id, '📞');
+      await tgAnswer(cb.id, '✆');
       SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() });
       await tgEdit(chatId, msgId,
-`<b>${t(lang,'support_title')}</b>
-<code>${UI.div}</code>
+`${UI.header(lang)}
 
-${t(lang,'support_write')}
+<b>${t(lang,'support_title')}</b>
+<code>${UI.sep}</code>
+
+<b>✎</b> ${t(lang,'support_write')}
 <i>${t(lang,'support_hint')}</i>
 
-<code>${UI.div}</code>
-⏱️ ${t(lang,'support_exp')}`,
-        { inline_keyboard: [[{ text: t(lang,'support_cancel'), callback_data:'m_cancelar_suporte' }]] });
+<code>${UI.sep}</code>
+<b>◔</b> ${t(lang,'support_exp')}`,
+        { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] });
       return;
     }
     if (data === 'm_cancelar_suporte') {
       SUPPORT_SESSIONS.delete(String(chatId));
-      await tgAnswer(cb.id, '❌');
+      await tgAnswer(cb.id, '✕');
       return cmdStart(chatId, msgId);
     }
 
@@ -640,131 +832,139 @@ ${t(lang,'support_write')}
     if (data === 'm_ajuda') {
       await tgAnswer(cb.id);
       await tgEdit(chatId, msgId,
-`<b>╭──『 ℹ️ AJUDA 』──╮</b>
-<code>${UI.div}</code>
-<b>Comandos:</b>
+`${UI.header(lang)}
 
-<code>/start</code>          — Menu
-<code>/gerar</code>          — Gerar licença
-<code>/listar</code>         — Listar
-<code>/stats</code>          — Estatísticas
-<code>/status &lt;k&gt;</code>     — Consultar
-<code>/activate &lt;i&gt; &lt;k&gt;</code> — Vincular
-<code>/desvincular &lt;k&gt;</code> — Desvincular
-<code>/revogar &lt;k&gt;</code>    — Revogar
-<code>/deletar &lt;k&gt;</code>    — Deletar uma
-<code>/deletartudo</code>     — Deletar TUDO
-<code>/resp &lt;id&gt; &lt;msg&gt;</code> — Responder suporte
-<code>/lang</code>           — Idioma
+<b>${t(lang,'help_title')}</b>
+<code>${UI.sep}</code>
+<b>${t(lang,'help_cmds')}:</b>
 
-<code>${UI.div}</code>`,
-        { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:'m_home' }]] });
+<code>/start</code>           Menu
+<code>/gerar</code>           Gerar
+<code>/listar</code>          Listar
+<code>/stats</code>           Estatísticas
+<code>/status &lt;k&gt;</code>      Consultar
+<code>/activate &lt;i&gt; &lt;k&gt;</code>  Vincular
+<code>/desvincular &lt;k&gt;</code> Desvincular
+<code>/revogar &lt;k&gt;</code>    Revogar
+<code>/deletar &lt;k&gt;</code>    Deletar uma
+<code>/deletartudo</code>     Deletar TUDO
+<code>/resp &lt;id&gt; &lt;msg&gt;</code> Responder
+<code>/lang</code>            Idioma
+
+<code>${UI.sep}</code>`,
+        { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] });
       return;
     }
 
     /* ── PERIGO ── */
     if (data === 'm_perigo') {
-      await tgAnswer(cb.id, '⚠️');
+      await tgAnswer(cb.id, '⚠');
       await tgEdit(chatId, msgId,
-`<b>╭──『 ⚠️ ZONA DE PERIGO 』──╮</b>
-<code>${UI.div}</code>
-<b>🔴 Ações IRREVERSÍVEIS</b>
-<code>${UI.div}</code>`,
+`${UI.header(lang)}
+
+<b>${t(lang,'danger_title')}</b>
+<code>${UI.sep}</code>
+<b>⚠  ${t(lang,'danger_warn')}</b>
+<code>${UI.sep}</code>`,
         { inline_keyboard: [
-          [{ text:'🗑️ Deletar Ativas', callback_data:'danger_ativas' }],
-          [{ text:'💣 Deletar TUDO',   callback_data:'danger_tudo' }],
-          [{ text:'🔙 Voltar',         callback_data:'m_home' }]
+          [{ text: t(lang,'danger_del_active'), callback_data:'danger_ativas' }],
+          [{ text: t(lang,'danger_del_all'),    callback_data:'danger_tudo' }],
+          [{ text: t(lang,'btn_back'),          callback_data:'m_home' }]
         ]});
       return;
     }
     if (data === 'danger_ativas') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `<b>⚠️ CONFIRMAR</b>\n<code>${UI.div}</code>\nDeletar <b>todas as ativas</b>?`,
+      `${UI.header(lang)}\n\n<b>⚠  CONFIRMAR</b>\n<code>${UI.sep}</code>\n${t(lang,'danger_confirm_active')}`,
       { inline_keyboard: [
-        [{ text:'✅ SIM', callback_data:'confirm_ativas' }],
-        [{ text:'❌ Cancelar', callback_data:'m_perigo' }]
+        [{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_ativas' }],
+        [{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]
       ]}); }
     if (data === 'danger_tudo') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `<b>💣 CONFIRMAR TUDO</b>\n<code>${UI.div}</code>\n<b>⚠️ DELETA TUDO</b>`,
+      `${UI.header(lang)}\n\n<b>💣  CONFIRMAR</b>\n<code>${UI.sep}</code>\n${t(lang,'danger_confirm_all')}`,
       { inline_keyboard: [
-        [{ text:'💣 SIM, TUDO', callback_data:'confirm_tudo' }],
-        [{ text:'❌ Cancelar', callback_data:'m_perigo' }]
+        [{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_tudo' }],
+        [{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]
       ]}); }
     if (data === 'confirm_ativas') {
-      await tgAnswer(cb.id, '⏳');
+      await tgAnswer(cb.id, '…');
       const keys = await redisKeys('ASHEO-*'); let n = 0;
       for (const k of keys) { const l = await redisGet(k); if (l && l.ativa) { await redisDel(k); n++; } }
-      return tgEdit(chatId, msgId, `✅ <b>${n}</b> licenças ativas removidas.`,
-        { inline_keyboard: [[{ text:'🔙 Menu', callback_data:'m_home' }]] });
+      return tgEdit(chatId, msgId, `✓  <b>${t(lang,'danger_done',{n})}</b>`,
+        { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
     }
     if (data === 'confirm_tudo') {
       await tgAnswer(cb.id, '💣');
       const keys = await redisKeys('ASHEO-*');
       for (const k of keys) await redisDel(k);
-      return tgEdit(chatId, msgId, `💣 <b>${keys.length}</b> registros apagados.`,
-        { inline_keyboard: [[{ text:'🔙 Menu', callback_data:'m_home' }]] });
+      return tgEdit(chatId, msgId, `💣  <b>${t(lang,'danger_done',{n:keys.length})}</b>`,
+        { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
     }
 
     /* ── DETALHES ── */
     if (data.startsWith('c_')) {
       const k = data.substring(2), l = await redisGet(k);
-      if (!l) { await tgAnswer(cb.id, '❌'); return; }
+      if (!l) { await tgAnswer(cb.id, '✕'); return; }
       await tgAnswer(cb.id);
-      const resta = l.lifetime ? '∞ (Lifetime)' : humanTime((l.expiraEm||0) - Date.now());
+      const resta = l.lifetime ? '∞  Lifetime' : humanTime((l.expiraEm||0) - Date.now());
       const pct = l.lifetime ? 100 : Math.max(0, Math.min(100, Math.round(((l.expiraEm-Date.now())/(l.dias*86400000))*100)));
-      const pk = PACOTES[l.plano] || { emoji:'📦' };
+      const pk = PACOTES[l.plano] || { emoji:'◆' };
+      const statusTxt = !l.ativa ? t(lang,'detail_revoked') : (Date.now() > l.expiraEm && !l.lifetime ? t(lang,'status_expired') : t(lang,'detail_active'));
       await tgEdit(chatId, msgId,
-`<b>╭──『 🔍 DETALHES 』──╮</b>
-<code>${UI.div}</code>
-<b>🔑 Chave:</b> <code>${k}</code>
-<code>${UI.div}</code>
-<b>${pk.emoji}  Plano:</b>     ${l.planoNome}
-<b>💰  Preço:</b>     <code>${precoFmt(l.preco)}</code>
-<b>📅  Emitida:</b>   ${formatDate(l.criadaEm)}
-<b>⏰  Expira:</b>    ${l.lifetime ? 'Nunca' : formatDate(l.expiraEm)}
-<b>⌛  Restante:</b>  ${resta}
-<b>🔥  Lifetime:</b>  ${l.lifetime ? '✅ Sim' : '❌ Não'}
-<b>📌  Status:</b>    ${l.ativa?'🟢 Ativa':'🔴 Revogada'}
-<b>🔗  Install:</b>   ${l.installId?`<code>${l.installId.substring(0,16)}…</code>`:'<i>não vinculada</i>'}
-<code>${UI.div}</code>
+`${UI.header(lang)}
+
+<b>${t(lang,'detail_title')}</b>
+<code>${UI.sep}</code>
+<b>⌬  ${t(lang,'detail_key')}</b>
+<code>${k}</code>
+<code>${UI.sep}</code>
+${UI.kv(pk.emoji, t(lang,'gen_plan'), `<b>${l.planoNome}</b>`)}
+${UI.kv('◆', t(lang,'gen_price'), `<code>${precoFmt(l.preco)}</code>`)}
+${UI.kv('◔', t(lang,'gen_issued'), formatDate(l.criadaEm))}
+${UI.kv('◕', t(lang,'gen_expires'), l.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(l.expiraEm))}
+${UI.kv('⟡', t(lang,'detail_remaining'), `<b>${resta}</b>`)}
+${UI.kv('∞', t(lang,'gen_lifetime'), l.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`)}
+${UI.kv('◉', t(lang,'detail_status'), statusTxt)}
+${UI.kv('⟡', t(lang,'detail_install'), l.installId?`<code>${l.installId.substring(0,16)}…</code>`:`<i>${t(lang,'detail_not_linked')}</i>`)}
+<code>${UI.sep}</code>
 <code>${progressBar(pct)}</code> ${pct}%`,
         { inline_keyboard: [
-          [{ text: l.installId?'🔓 Desvincular':'🔗 Vincular', callback_data: l.installId?`dv_${k}`:`v_${k}` }],
-          [{ text:'❌ Revogar', callback_data:`rv_${k}` }, { text:'🗑️ Deletar', callback_data:`dl_${k}` }],
-          [{ text:'🔙 Menu',   callback_data:'m_home' }]
+          [{ text: l.installId ? t(lang,'act_unlink') : t(lang,'act_link'), callback_data: l.installId?`dv_${k}`:`v_${k}` }],
+          [{ text: t(lang,'act_revoke'), callback_data:`rv_${k}` }, { text: t(lang,'act_delete'), callback_data:`dl_${k}` }],
+          [{ text: t(lang,'btn_menu'),   callback_data:'m_home' }]
         ]});
       return;
     }
     if (data.startsWith('v_')) { const k = data.substring(2); await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `<b>🔗 VINCULAR</b>\n<code>/activate &lt;installId&gt; ${k}</code>`,
-      { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:`c_${k}` }]] }); }
+      `${UI.header(lang)}\n\n<b>${t(lang,'act_link')}</b>\n<code>/activate &lt;installId&gt; ${k}</code>`,
+      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
     if (data.startsWith('dv_')) {
       const k = data.substring(3), l = await redisGet(k);
       if (l) { l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); }
-      await tgAnswer(cb.id, '🔓');
-      return tgEdit(chatId, msgId, `✅ Desvinculada.`, { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:`c_${k}` }]] });
+      await tgAnswer(cb.id, '⌬');
+      return tgEdit(chatId, msgId, `✓ ${t(lang,'act_unlink')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] });
     }
     if (data.startsWith('rv_')) {
       const k = data.substring(3), l = await redisGet(k);
       if (l) { l.ativa = false; await redisSet(k, JSON.stringify(l)); }
-      await tgAnswer(cb.id, '❌');
-      return tgEdit(chatId, msgId, `❌ Revogada.`, { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:`c_${k}` }]] });
+      await tgAnswer(cb.id, '✕');
+      return tgEdit(chatId, msgId, `✕ ${t(lang,'act_revoke')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] });
     }
     if (data.startsWith('dl_')) {
       const k = data.substring(3);
       await redisDel(k);
-      await tgAnswer(cb.id, '🗑️');
-      return tgEdit(chatId, msgId, `🗑️ Deletada.`, { inline_keyboard: [[{ text:'🔙 Menu', callback_data:'m_home' }]] });
+      await tgAnswer(cb.id, '✕');
+      return tgEdit(chatId, msgId, `✕ ${t(lang,'act_delete')}`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
     }
 
     await tgAnswer(cb.id);
   } catch (e) {
     log('ERRO', 'Callback: ' + e.message);
-    try { await tgAnswer(cb.id, '❌ Erro'); } catch {}
+    try { await tgAnswer(cb.id, '✕ Erro'); } catch {}
   }
 }
 
 /* ═══════════════════════════════════════════════
-   MESSAGE HANDLER — suporte + comandos
+   ◈ MESSAGE HANDLER — suporte + comandos
    ═══════════════════════════════════════════════ */
 async function handleMessage(msg) {
   const chatId = msg.chat.id, userId = String(msg.from.id);
@@ -774,7 +974,7 @@ async function handleMessage(msg) {
   const isOwner = userId === String(OWNER_ID);
   const lang = USER_LANG.get(String(chatId)) || 'pt';
 
-  /* ── Sessão de suporte ativa? ── */
+  /* ── Sessão suporte ── */
   const sessao = SUPPORT_SESSIONS.get(String(chatId));
   if (sessao && sessao.step === 'waiting') {
     if (cmd === '/cancelar' || cmd === '/cancel' || cmd === 'cancelar' || cmd === 'cancel') {
@@ -787,27 +987,30 @@ async function handleMessage(msg) {
     const username = msg.from.username ? `@${msg.from.username}` : 'sem username';
 
     await tgSend(chatId,
-`<b>${t(lang,'support_sent')}</b>
-<code>${UI.div}</code>
+`${UI.header(lang)}
+
+<b>${t(lang,'support_sent')}</b>
+<code>${UI.sep}</code>
 
 ${t(lang,'support_sent_desc')}
 
-<code>${UI.div}</code>
-<i>Você receberá a resposta aqui.</i>`,
-      { inline_keyboard: [[{ text: t(lang,'menu'), callback_data:'m_home' }]] });
+<code>${UI.sep}</code>
+<i>${lang==='en'?'You will receive the reply here.':'Você receberá a resposta aqui.'}</i>`,
+      { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
 
     if (!isOwner) {
       await tgSend(OWNER_ID,
-`<b>📩 NOVA MENSAGEM DE SUPORTE</b>
-<code>${UI.div}</code>
-<b>👤 Nome:</b> ${userInfo}
-<b>🏷️ User:</b> ${username}
-<b>🆔 Chat ID:</b> <code>${chatId}</code>
-<code>${UI.div}</code>
-<b>💬 Mensagem:</b>
+`<b>◈ ──『 ✆ NOVA MENSAGEM 』── ◈</b>
+<code>${UI.sep}</code>
+<b>◉  Nome:</b> ${userInfo}
+<b>◈  User:</b> ${username}
+<b>⌬  Chat ID:</b> <code>${chatId}</code>
+<b>◐  Idioma:</b> ${lang.toUpperCase()}
+<code>${UI.sep}</code>
+<b>✎  Mensagem:</b>
 ${texto}
 
-<code>${UI.div}</code>
+<code>${UI.sep}</code>
 <i>Responda com:</i>
 <code>/resp ${chatId} sua mensagem</code>`);
     }
@@ -820,19 +1023,21 @@ ${texto}
     if (cmd === '/start' || cmd === '/contacto' || cmd === '/contact' || cmd === '/ajuda' || cmd === '/help' || cmd === '/lang') {
       if (cmd === '/lang') {
         await tgSend(chatId,
-`<b>🌐 ${t(lang,'lang_select')}</b>`,
+`<b>◐  ${t(lang,'lang_select')}</b>`,
           { inline_keyboard: [
-            [{ text:'🇧🇷 Português', callback_data:'lang_pt' }, { text:'🇺🇸 English', callback_data:'lang_en' }]
+            [{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]
           ]});
         return;
       }
       await tgSend(chatId,
-`<b>👋 ${t(lang,'welcome_title')}</b>
-<code>${UI.div}</code>
+`${UI.header(lang)}
+
+<b>◈  ${t(lang,'welcome_title')}</b>
+<code>${UI.sep}</code>
 <i>${t(lang,'welcome_desc')}</i>`,
         { inline_keyboard: [
           [{ text: t(lang,'contact'), callback_data:'m_contacto' }],
-          [{ text:'🌐 Idioma / Language', callback_data:'m_lang' }]
+          [{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]
         ]});
       return;
     }
@@ -844,29 +1049,28 @@ ${texto}
     if (cmd === '/start' || cmd === '/menu') { await cmdStart(chatId); return; }
     if (cmd === '/lang') {
       await tgSend(chatId,
-`<b>🌐 ${t(lang,'lang_select')}</b>`,
+`<b>◐  ${t(lang,'lang_select')}</b>`,
         { inline_keyboard: [
-          [{ text:'🇧🇷 Português', callback_data:'lang_pt' }, { text:'🇺🇸 English', callback_data:'lang_en' }]
+          [{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]
         ]});
       return;
     }
 
-    /* /resp <chatId> <msg> */
     if (cmd === '/resp') {
       const target = args[1];
       const resposta = args.slice(2).join(' ');
-      if (!target || !resposta) { await tgSend(chatId, `⚠️ <code>/resp &lt;chatId&gt; &lt;mensagem&gt;</code>`); return; }
+      if (!target || !resposta) { await tgSend(chatId, `⚠  <code>/resp &lt;chatId&gt; &lt;mensagem&gt;</code>`); return; }
       const targetLang = USER_LANG.get(String(target)) || 'pt';
       await tgSend(target,
-`<b>📞 RESPOSTA DO SUPORTE</b>
-<code>${UI.div}</code>
+`<b>◈ ──『 ✆ RESPOSTA DO SUPORTE 』── ◈</b>
+<code>${UI.sep}</code>
 
 ${resposta}
 
-<code>${UI.div}</code>
+<code>${UI.sep}</code>
 <i>Mozlince Nebula Support</i>`,
         { inline_keyboard: [[{ text: t(targetLang,'contact'), callback_data:'m_contacto' }]] });
-      await tgSend(chatId, `✅ Resposta enviada para <code>${target}</code>`);
+      await tgSend(chatId, `✓  Resposta enviada para <code>${target}</code>`);
       log('SUPPORT', `Resposta → ${target}`);
       return;
     }
@@ -879,19 +1083,19 @@ ${resposta}
         if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` });
         kb.inline_keyboard.push(linha);
       }
-      await tgSend(chatId, `<b>⚡ GERAR LICENÇA</b>`, kb);
+      await tgSend(chatId, `<b>⚡  ${t(lang,'gen_title')}</b>`, kb);
       return;
     }
 
     if (cmd === '/listar') {
       const keys = await redisKeys('ASHEO-*');
-      if (keys.length === 0) { await tgSend(chatId, `📭 Nenhuma.`); return; }
-      let txt = `<b>📋 LICENÇAS (${keys.length})</b>\n<code>${UI.div}</code>\n`;
+      if (keys.length === 0) { await tgSend(chatId, `<i>${t(lang,'list_empty')}</i>`); return; }
+      let txt = `<b>${t(lang,'list_title')} (${keys.length})</b>\n<code>${UI.sep}</code>\n`;
       for (let i = 0; i < Math.min(keys.length, 30); i++) {
         const l = await redisGet(keys[i]); if (!l) continue;
         const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now());
-        const emoji = l.lifetime ? '🔥' : (l.ativa ? '🟢' : '🔴');
-        txt += `${emoji} <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n`;
+        const emoji = l.lifetime ? '∞' : (l.ativa ? '●' : '○');
+        txt += `<b>${emoji}</b> <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n`;
       }
       await tgSend(chatId, txt);
       return;
@@ -899,75 +1103,73 @@ ${resposta}
 
     if (cmd === '/status') {
       const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠️ /status &lt;chave&gt;`); return; }
+      if (!k) { await tgSend(chatId, `⚠  /status &lt;chave&gt;`); return; }
       const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `❌ Não encontrada`); return; }
+      if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; }
       const resta = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now());
-      const pk = PACOTES[l.plano] || { emoji:'📦' };
+      const pk = PACOTES[l.plano] || { emoji:'◆' };
       await tgSend(chatId,
-`<b>🔍 STATUS</b>
-<code>${UI.div}</code>
-<b>🔑</b> <code>${k}</code>
-<b>${pk.emoji} ${l.planoNome}</b>
-💰 ${precoFmt(l.preco)}
-📅 ${formatDate(l.criadaEm)}
-⏰ ${l.lifetime?'Nunca':formatDate(l.expiraEm)}
-⌛ ${resta}
-🔥 Lifetime: ${l.lifetime?'✅':'❌'}
-📌 ${l.ativa?'🟢':'🔴'}`);
+`<b>◉  ${t(lang,'detail_title')}</b>
+<code>${UI.sep}</code>
+<b>⌬  ${t(lang,'detail_key')}:</b> <code>${k}</code>
+<b>${pk.emoji}  ${t(lang,'gen_plan')}:</b> ${l.planoNome}
+<b>◆  ${t(lang,'gen_price')}:</b> ${precoFmt(l.preco)}
+<b>◔  ${t(lang,'gen_issued')}:</b> ${formatDate(l.criadaEm)}
+<b>◕  ${t(lang,'gen_expires')}:</b> ${l.lifetime?t(lang,'gen_never'):formatDate(l.expiraEm)}
+<b>⟡  ${t(lang,'detail_remaining')}:</b> ${resta}
+<b>∞  ${t(lang,'gen_lifetime')}:</b> ${l.lifetime?'✓':'✕'}
+<b>◉  ${t(lang,'detail_status')}:</b> ${l.ativa?t(lang,'detail_active'):t(lang,'detail_revoked')}`);
       return;
     }
 
     if (cmd === '/activate') {
       const chave = args[args.length-1], installId = args.slice(1, args.length-1).join(' ');
-      if (!installId || !chave) { await tgSend(chatId, `⚠️ /activate &lt;id&gt; &lt;chave&gt;`); return; }
+      if (!installId || !chave) { await tgSend(chatId, `⚠  /activate &lt;id&gt; &lt;chave&gt;`); return; }
       const l = await redisGet(chave);
-      if (!l) { await tgSend(chatId, `❌ Inválida`); return; }
-      if (l.installId) { await tgSend(chatId, `⚠️ Já vinculada`); return; }
+      if (!l) { await tgSend(chatId, `✕  Inválida`); return; }
+      if (l.installId) { await tgSend(chatId, `⚠  Já vinculada`); return; }
       l.installId = installId; l.ativadaEm = Date.now();
       await redisSet(chave, JSON.stringify(l));
-      await tgSend(chatId, `✅ Vinculada!\n🔑 <code>${chave}</code>\n🔗 <code>${installId}</code>`);
+      await tgSend(chatId, `✓  Vinculada!\n⌬ <code>${chave}</code>\n⟡ <code>${installId}</code>`);
       return;
     }
 
     if (cmd === '/desvincular') {
       const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠️`); return; }
+      if (!k) { await tgSend(chatId, `⚠`); return; }
       const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `❌`); return; }
+      if (!l) { await tgSend(chatId, `✕`); return; }
       l.installId = null; l.ativadaEm = null;
       await redisSet(k, JSON.stringify(l));
-      await tgSend(chatId, `🔓 Desvinculada`);
+      await tgSend(chatId, `⌬  Desvinculada`);
       return;
     }
 
     if (cmd === '/revogar') {
       const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠️`); return; }
+      if (!k) { await tgSend(chatId, `⚠`); return; }
       const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `❌`); return; }
+      if (!l) { await tgSend(chatId, `✕`); return; }
       l.ativa = false;
       await redisSet(k, JSON.stringify(l));
-      await tgSend(chatId, `❌ Revogada`);
+      await tgSend(chatId, `✕  Revogada`);
       return;
     }
 
-    /* ⚡ DELETAR UMA */
     if (cmd === '/deletar') {
       const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠️ <code>/deletar &lt;chave&gt;</code>`); return; }
+      if (!k) { await tgSend(chatId, `⚠  <code>/deletar &lt;chave&gt;</code>`); return; }
       const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `❌ Não encontrada`); return; }
+      if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; }
       await redisDel(k);
-      await tgSend(chatId, `🗑️ Deletada: <code>${k}</code>`);
+      await tgSend(chatId, `✕  Deletada: <code>${k}</code>`);
       return;
     }
 
-    /* ⚡ DELETAR TUDO */
     if (cmd === '/deletartudo') {
       const keys = await redisKeys('ASHEO-*');
       for (const k of keys) await redisDel(k);
-      await tgSend(chatId, `💣 <b>${keys.length}</b> licenças apagadas.`);
+      await tgSend(chatId, `💣  <b>${keys.length}</b> licenças apagadas.`);
       return;
     }
 
@@ -983,14 +1185,14 @@ ${resposta}
         if (l.preco) receita += Number(l.preco) || 0;
       }
       await tgSend(chatId,
-`<b>📊 ESTATÍSTICAS</b>
-<code>${UI.div}</code>
-🔑 Total: <code>${keys.length}</code>
-🟢 Ativas: <code>${ativas}</code>
-🔴 Expiradas: <code>${exp}</code>
-🔗 Vinculadas: <code>${vinc}</code>
-🔥 Lifetime: <code>${life}</code>
-💰 Receita: <code>${precoFmt(receita)}</code>`);
+`<b>◧  ${t(lang,'stats_title')}</b>
+<code>${UI.sep}</code>
+<b>◈</b> ${t(lang,'stats_total')}: <code>${keys.length}</code>
+<b>●</b> ${t(lang,'stats_active')}: <code>${ativas}</code>
+<b>○</b> ${t(lang,'stats_expired')}: <code>${exp}</code>
+<b>⟡</b> ${t(lang,'stats_linked')}: <code>${vinc}</code>
+<b>∞</b> ${t(lang,'stats_lifetime')}: <code>${life}</code>
+<b>◆</b> ${t(lang,'stats_revenue')}: <code>${precoFmt(receita)}</code>`);
       return;
     }
 
@@ -1008,22 +1210,22 @@ app.post('/telegram-webhook', async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════
-   API REST v8.0
+   ◈ API REST v8.1
    ═══════════════════════════════════════════════ */
-const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.0',codename:'Nebula',timestamp:new Date().toISOString()});
-app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.0',status:'live'}));
+const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.1',codename:'Aurora',timestamp:new Date().toISOString()});
+app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.1',status:'live'}));
 app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
 
-const versionHandler = (req,res)=>res.json({ok:true,version:'8.0',codename:'Nebula',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
+const versionHandler = (req,res)=>res.json({ok:true,version:'8.1',codename:'Aurora',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
 app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
-const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.0',hora:new Date().toISOString()});
+const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.1',hora:new Date().toISOString()});
 app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
 
 function bootstrapHandler(req,res){
   const auth=validateBearer(req);
   log('BOOT',`Bootstrap (auth=${auth.ok})`);
   res.json({
-    ok:true,version:'8.0',codename:'Nebula',apiVersion:'v1',
+    ok:true,version:'8.1',codename:'Aurora',apiVersion:'v1',
     issuedAt:new Date().toISOString(),serverTime:Date.now(),
     source:'premium',sourceType:'server',isFounder:true,tier:'premium',kind:'premium',
     config:{apiBase:'https://mozlince.onrender.com',featuresEnabled:true,premiumEnabled:true,syncEnabled:true,gatewayMode:'default',telemetryEnabled:false,retryAfterMs:5000,heartbeatMs:60000},
@@ -1061,18 +1263,18 @@ function dashboardHandler(req,res){
   const auth=validateBearer(req);
   const ok=auth.ok&&auth.decoded.tier==='premium';
   res.json({ok:true,source:ok?'premium':'free',sourceType:'server',isFounder:true,
-    dashboard:{tier:ok?'premium':'free',source:ok?'premium':'free',seat:auth.ok?1:0,seats:auth.ok?1:0,installId:auth.ok?auth.decoded.sub:null,expiresAt:auth.ok?auth.decoded.exp*1000:null,lifetime:auth.ok?auth.decoded.lifetime===true:false,features:ok?mapFeatures(true):mapFeatures(false),capabilities:ok?mapCapabilities(true):mapCapabilities(false),limits:ok?PREMIUM_LIMITS:FREE_LIMITS,scope:ok?PREMIUM_SCOPE:['free']},serverTime:Date.now()});
+    dashboard:{tier:ok?'premium':'free',source:ok?'premium':'free',seat:auth.ok?1:0,seats:auth.ok?1:0,installId:auth.ok?auth.decoded.sub:null,expiresAt:auth.ok?auth.decoded.expiresAt:null,lifetime:auth.ok?auth.decoded.lifetime===true:false,features:ok?mapFeatures(true):mapFeatures(false),capabilities:ok?mapCapabilities(true):mapCapabilities(false),limits:ok?PREMIUM_LIMITS:FREE_LIMITS,scope:ok?PREMIUM_SCOPE:['free']},serverTime:Date.now()});
 }
 app.get('/v1/dashboard',dashboardHandler); app.get('/api/v1/dashboard',dashboardHandler);
 
 function entitlementHandler(req,res){
   const auth=validateBearer(req);
   if(!auth.ok)return res.status(401).json({ok:false,error:'missing_bearer'});
-  res.json({ok:true,source:'premium',sourceType:'server',isFounder:true,tier:'premium',kind:'premium',active:true,isPremium:true,isVerified:true,installId:auth.decoded.sub,plan:'premium',planDisplayName:'Premium',lifetime:auth.decoded.lifetime===true,scope:PREMIUM_SCOPE,features:mapFeatures(true),capabilities:mapCapabilities(true),limits:{...PREMIUM_LIMITS},exp:auth.decoded.exp*1000,serverTime:Date.now()});
+  res.json({ok:true,source:'premium',sourceType:'server',isFounder:true,tier:'premium',kind:'premium',active:true,isPremium:true,isVerified:true,installId:auth.decoded.sub,plan:'premium',planDisplayName:'Premium',lifetime:auth.decoded.lifetime===true,licenseKey:auth.decoded.licenseKey,issuedAt:auth.decoded.issuedAt,expiresAt:auth.decoded.expiresAt,scope:PREMIUM_SCOPE,features:mapFeatures(true),capabilities:mapCapabilities(true),limits:{...PREMIUM_LIMITS},exp:auth.decoded.exp*1000,serverTime:Date.now()});
 }
 app.get('/v1/entitlement',entitlementHandler); app.get('/api/v1/entitlement',entitlementHandler);
 
-function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.0'});}
+function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.1'});}
 app.get('/v1/premium/definitions',premiumDefHandler); app.get('/api/v1/premium/definitions',premiumDefHandler);
 
 function planosHandler(req,res){res.json({ok:true,currency:'USD',planos:Object.entries(PACOTES).map(([id,p])=>({id,nome:p.nome,dias:p.dias,lifetime:p.lifetime,preco:p.preco,preco_fmt:precoFmt(p.preco),emoji:p.emoji}))});}
@@ -1090,12 +1292,12 @@ app.post('/v1/telemetry',telemetryHandler); app.post('/api/v1/telemetry',telemet
 function supportHandler(req,res){
   const {chatId,message}=req.body||{};
   if(!message)return res.status(400).json({ok:false,error:'missing_message'});
-  if(chatId) tgSend(OWNER_ID,`<b>📩 SUPORTE (API)</b>\n🆔 <code>${chatId}</code>\n\n${message}`);
+  if(chatId) tgSend(OWNER_ID,`<b>✆ SUPORTE (API)</b>\n⌬ <code>${chatId}</code>\n\n${message}`);
   res.json({ok:true,received:true,serverTime:Date.now()});
 }
 app.post('/v1/support',supportHandler); app.post('/api/v1/support',supportHandler);
 
-/* ── Activate ── */
+/* ── Activate — ⚡ v8.1: exp REAL da chave ── */
 async function activateHandler(req,res){
   const inicio=Date.now();
   const {installId,licenseKey,clientTag}=req.body||{};
@@ -1109,7 +1311,7 @@ async function activateHandler(req,res){
     if(!PREMIUM_FEATURES[feature])return res.status(404).json({ok:false,error:'unknown_feature'});
     const now=Math.floor(Date.now()/1000);
     const token=jwt.sign({sub:auth.decoded.sub,installId:auth.decoded.sub,feature,kind:'feature',type:'feature',tier:'premium',source:'premium',isFounder:true,scope:[feature,'premium'],iat:now,nbf:now-5,exp:now+300,jti:crypto.randomUUID()},PRIVATE_KEY,{algorithm:'ES256'});
-    log('FEAT',`✅ ${feature} | ${auth.decoded.sub} | ${Date.now()-inicio}ms`);
+    log('FEAT',`✓ ${feature} | ${auth.decoded.sub} | ${Date.now()-inicio}ms`);
     return res.json({ok:true,token,feature,expires_in:300,exp:now+300});
   }
 
@@ -1122,20 +1324,36 @@ async function activateHandler(req,res){
   if(!lic){log('WARN',`NAO ENCONTRADA: ${keyNorm.substring(0,18)}...`);return res.status(404).json({error:'invalid_license'});}
   if(!lic.ativa)return res.status(403).json({error:'revoked'});
 
+  // ⚡ v8.1 — VERIFICA EXPIRAÇÃO ANTES DE VINCULAR
+  if(!lic.lifetime && Date.now() > lic.expiraEm){
+    log('WARN',`EXPIRADA: ${keyNorm.substring(0,18)}... | criada ${new Date(lic.criadaEm).toISOString()} | expirou ${new Date(lic.expiraEm).toISOString()}`);
+    return res.status(403).json({
+      error:'expired',
+      message:'Esta licença expirou. Renove para continuar.',
+      expiredAt: lic.expiraEm,
+      expiredAtISO: new Date(lic.expiraEm).toISOString()
+    });
+  }
+
   if(!lic.installId){lic.installId=installId;lic.ativadaEm=Date.now();await redisSet(keyNorm,JSON.stringify(lic));log('OK',`Vinculada: ${keyNorm.substring(0,18)}... -> ${installId}`);}
   else if(lic.installId!==installId)return res.status(403).json({error:'already_used'});
-  if(!lic.lifetime&&Date.now()>lic.expiraEm)return res.status(403).json({error:'expired'});
 
   try{
-    const token=signToken(buildClaims(installId,lic));
-    log('ATIV',`✅ ${installId.substring(0,12)}... | ${keyNorm.substring(0,18)}... | ${Date.now()-inicio}ms`);
+    const claims = buildClaims(installId, lic);
+    const token=signToken(claims);
+    const expiresIn = lic.lifetime ? -1 : Math.max(0, Math.floor((lic.expiraEm - Date.now())/1000));
+    log('ATIV',`✓ ${installId.substring(0,12)}... | ${keyNorm.substring(0,18)}... | expira em ${expiresIn}s | ${Date.now()-inicio}ms`);
     return res.json({
       token,tier:'premium',kind:'premium',source:'premium',sourceType:'server',isFounder:true,
       seat:1,seats:1,gwPass:null,plan:'premium',planDisplayName:'Premium',
       lifetime:lic.lifetime===true,
-      expires_in:lic.lifetime?-1:Math.floor((lic.expiraEm-Date.now())/1000),
+      // ⚡ v8.1 — DATA EXATA da chave (não mais calculada)
+      expiresIn,
+      expiresAt: lic.lifetime ? null : lic.expiraEm,
+      expiresAtISO: lic.lifetime ? null : new Date(lic.expiraEm).toISOString(),
+      issuedAt: lic.criadaEm,
+      issuedAtISO: new Date(lic.criadaEm).toISOString(),
       licenseKey:keyNorm,
-      // ⚡ v8: mensagem de boas-vindas
       welcome: {
         pt: '🎉 Parabéns! Licença ativada com sucesso.',
         en: '🎉 Congratulations! License successfully activated.'
@@ -1187,7 +1405,7 @@ app.post('/verificar-licenca',(req,res)=>{
 function heartbeatHandler(req,res){
   const auth=validateBearer(req);
   if(!auth.ok)return res.status(401).json({ok:false,error:'missing_bearer'});
-  res.json({ok:true,alive:true,serverTime:Date.now(),expiresAt:auth.decoded.exp*1000});
+  res.json({ok:true,alive:true,serverTime:Date.now(),expiresAt:auth.decoded.expiresAt,expiresIn:auth.decoded.expiresAt?(Math.max(0,Math.floor((auth.decoded.expiresAt-Date.now())/1000))):-1,lifetime:auth.decoded.lifetime===true});
 }
 app.post('/v1/heartbeat',heartbeatHandler); app.get('/v1/heartbeat',heartbeatHandler);
 app.post('/api/v1/heartbeat',heartbeatHandler); app.get('/api/v1/heartbeat',heartbeatHandler);
@@ -1195,21 +1413,22 @@ app.post('/api/v1/heartbeat',heartbeatHandler); app.get('/api/v1/heartbeat',hear
 app.use((req,res)=>{res.status(404).json({ok:false,error:'not_found',path:req.path});});
 
 /* ═══════════════════════════════════════════════
-   START
+   ◈ START
    ═══════════════════════════════════════════════ */
 const PORT=process.env.PORT||3000;
 app.listen(PORT,()=>{
   banner();
-  log('SYS',`🚀 Mozlince Nebula v8.0 na porta ${PORT}`);
+  log('SYS',`Mozlince Nebula v8.1 Aurora na porta ${PORT}`);
   log('SYS',`Chave: ${ORIGEM}`);
   log('SYS',`Redis: ${UPSTASH_URL?'OK':'FALTA'}`);
   log('SYS',`Telegram: ${TELEGRAM_TOKEN?'OK':'FALTA'}`);
   log('SYS',`Planos: ${Object.keys(PACOTES).length} (USD)`);
-  log('OK', `✅ Bug "Never" corrigido (lifetime explícito)`);
-  log('OK', `✅ Suporte interativo + /resp`);
-  log('OK', `✅ Deletar uma / Deletar tudo`);
-  log('OK', `✅ Tradutor PT/EN com /lang`);
-  log('OK', `✅ Welcome message no /activate`);
+  log('OK', `✔ Expiração REAL — 3d/7d/15d… expiram na hora exata`);
+  log('OK', `✔ JWT usa expiraEm original (nunca renova)`);
+  log('OK', `✔ Data exata retornada à extensão`);
+  log('OK', `✔ Tradução TOTAL PT/EN`);
+  log('OK', `✔ Layout premium Aurora`);
+  log('OK', `✔ Suporte interativo + /resp`);
 });
 
 process.on('uncaughtException',e=>log('ERRO','Uncaught: '+e.message));
