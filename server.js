@@ -12,7 +12,7 @@ app.use(express.json());
 const C = { r:'\x1b[0m', b:'\x1b[1m', g:'\x1b[32m', y:'\x1b[33m', red:'\x1b[31m', c:'\x1b[36m', m:'\x1b[35m', bl:'\x1b[34m', gr:'\x1b[90m' };
 function log(t, m) {
   const ts = new Date().toISOString().replace('T',' ').substring(0,19);
-  const cores = { INFO:C.c, OK:C.g, WARN:C.y, ERRO:C.red, SYS:C.m, ATIV:C.bl, SYNC:'\x1b[35m', BOT:'\x1b[36m' };
+  const cores = { INFO:C.c, OK:C.g, WARN:C.y, ERRO:C.red, SYS:C.m, ATIV:C.bl, SYNC:'\x1b[35m', BOT:'\x1b[36m', DBG:'\x1b[33m' };
   console.log(`${C.gr}[${ts}]${C.r} ${cores[t]||C.r}${C.b}[${t}]${C.r} ${m}`);
 }
 
@@ -50,19 +50,81 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
 // ═══════════════════════════════════════════════
+// 🔑 NORMALIZAÇÃO DE CHAVES
+// ═══════════════════════════════════════════════
+function normalizeKey(key) {
+  if (!key || typeof key !== 'string') return '';
+  return key.trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9\-]/g,'');
+}
+
+// ═══════════════════════════════════════════════
+// 🔄 MIGRAÇÃO: formato antigo → novo
+// ═══════════════════════════════════════════════
+function migrarLicenca(lic) {
+  if (!lic || typeof lic !== 'object') return lic;
+  const novo = { ...lic };
+
+  // ─── Plano ───
+  if (!novo.plano && novo.plan) novo.plano = novo.plan === 'premium' ? 'unli' : novo.plan;
+  if (!novo.plano) novo.plano = '30d'; // default
+  if (!novo.planoNome) {
+    const pk = PACOTES[novo.plano];
+    novo.planoNome = pk ? pk.nome : (novo.plan === 'premium' ? 'Ilimitado' : 'Premium');
+  }
+
+  // ─── Dias ───
+  if (typeof novo.dias !== 'number') {
+    novo.dias = typeof novo.days === 'number' ? novo.days : (novo.plano === 'unli' ? 3650 : 30);
+  }
+
+  // ─── Datas ───
+  if (!novo.criadaEm && novo.createdAt) novo.criadaEm = novo.createdAt;
+  if (!novo.criadaEm) novo.criadaEm = Date.now();
+
+  if (typeof novo.ilimitada !== 'boolean') novo.ilimitada = novo.dias >= 3650;
+
+  if (!novo.expiraEm) {
+    if (novo.expiraEmExplicito) novo.expiraEm = novo.expiraEmExplicito;
+    else novo.expiraEm = novo.ilimitada ? novo.criadaEm + 365*24*60*60*1000*10 : novo.criadaEm + novo.dias * 24*60*60*1000;
+  }
+
+  // ─── Ativa ───
+  if (typeof novo.ativa !== 'boolean') novo.ativa = typeof novo.active === 'boolean' ? novo.active : true;
+
+  // ─── Preço ───
+  if (!novo.preco) {
+    const pk = PACOTES[novo.plano];
+    novo.preco = pk ? pk.preco : 'R$ 0,00';
+  }
+
+  // ─── Chave ───
+  if (!novo.chave) novo.chave = null;
+
+  return novo;
+}
+
+// ═══════════════════════════════════════════════
 // REDIS
 // ═══════════════════════════════════════════════
 async function redisSet(key, value) {
-  const res = await fetch(`${UPSTASH_URL}/set/${key}`, { method:'POST', headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}`, 'Content-Type':'application/json' }, body:value });
+  const k = normalizeKey(key);
+  const res = await fetch(`${UPSTASH_URL}/set/${k}`, { method:'POST', headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}`, 'Content-Type':'application/json' }, body:value });
   return res.json();
 }
 async function redisGet(key) {
-  const res = await fetch(`${UPSTASH_URL}/get/${key}`, { headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}` } });
+  const k = normalizeKey(key);
+  if (!k) return null;
+  const res = await fetch(`${UPSTASH_URL}/get/${k}`, { headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}` } });
   const data = await res.json();
-  return data.result ? JSON.parse(data.result) : null;
+  if (!data.result) return null;
+  try {
+    const raw = JSON.parse(data.result);
+    return migrarLicenca(raw);
+  } catch { return null; }
 }
 async function redisDel(key) {
-  await fetch(`${UPSTASH_URL}/del/${key}`, { method:'POST', headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}` } });
+  const k = normalizeKey(key);
+  await fetch(`${UPSTASH_URL}/del/${k}`, { method:'POST', headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}` } });
 }
 async function redisKeys(pattern='*') {
   const res = await fetch(`${UPSTASH_URL}/keys/${pattern}`, { headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}` } });
@@ -154,7 +216,7 @@ function menuPrincipal() {
   const texto =
     `╔══════════════════════════════════════╗\n` +
     `║   👑 <b>MOZLINCE LICENSE PANEL</b> 👑   ║\n` +
-    `║      <i>Premium Edition v4.1</i>         ║\n` +
+    `║      <i>Premium Edition v4.4</i>         ║\n` +
     `╚══════════════════════════════════════╝\n\n` +
     `🎯 <b>Painel de Controle Premium</b>\n\n` +
     `💎 <i>Sistema completo de licenças</i>\n` +
@@ -180,7 +242,7 @@ async function cmdStart(chatId, msgId=null) {
 }
 
 // ═══════════════════════════════════════════════
-// HANDLER CALLBACKS
+// HANDLERS
 // ═══════════════════════════════════════════════
 async function handleCallback(cb) {
   const chatId = cb.message.chat.id;
@@ -192,7 +254,7 @@ async function handleCallback(cb) {
     await tgAnswer(cb.id, '⛔ Acesso negado.');
     if (data === 'm_contacto') {
       await tgSend(chatId, '📞 <b>Pedido enviado ao administrador.</b>');
-      await tgSend(OWNER_ID, `📞 Pedido de contacto\n👤 ${cb.from.first_name||'?'}\n🆔 @${cb.from.username||'sem'}\n💬 <code>${chatId}</code>`);
+      await tgSend(OWNER_ID, `📞 Pedido\n👤 ${cb.from.first_name||'?'}\n💬 <code>${chatId}</code>`);
     }
     return;
   }
@@ -226,6 +288,7 @@ async function handleCallback(cb) {
         criadaEm:agora, expiraEm:expira, ilimitada: p.dias>=3650,
         ativa:true, installId:null, ativadaEm:null
       }));
+      log('OK', 'Chave gerada: ' + chave);
       await tgAnswer(cb.id, '✅ Licença gerada!');
       await tgEdit(chatId, msgId,
         `✅ <b>LICENÇA GERADA!</b>\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
@@ -312,7 +375,7 @@ async function handleCallback(cb) {
     if (data === 'm_contacto') {
       await tgAnswer(cb.id, '📞 Enviado!');
       await tgEdit(chatId, msgId, `📞 <b>CONTACTAR ADMIN</b>\n\n✅ Pedido enviado!\n\nO admin responderá em breve.`, { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:'m_home' }]] });
-      if (userId !== String(OWNER_ID)) await tgSend(OWNER_ID, `📞 Pedido de contacto\n👤 ${cb.from.first_name||'?'}\n💬 <code>${chatId}</code>`);
+      if (userId !== String(OWNER_ID)) await tgSend(OWNER_ID, `📞 Pedido\n👤 ${cb.from.first_name||'?'}\n💬 <code>${chatId}</code>`);
       return;
     }
 
@@ -336,8 +399,7 @@ async function handleCallback(cb) {
     if (data === 'm_perigo') {
       await tgAnswer(cb.id, '⚠️ Zona perigosa');
       await tgEdit(chatId, msgId,
-        `⚠️ <b>ZONA DE PERIGO</b>\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `🚨 Ações irreversíveis!`,
+        `⚠️ <b>ZONA DE PERIGO</b>\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n🚨 Ações irreversíveis!`,
         { inline_keyboard: [
           [{ text:'🗑️ DELETAR ATIVAS', callback_data:'danger_ativas' }],
           [{ text:'💣 DELETAR TUDO', callback_data:'danger_tudo' }],
@@ -548,12 +610,7 @@ async function handleMessage(msg) {
         if (l.installId) vinc++; if (l.ilimitada) unli++;
       }
       await tgSend(chatId,
-        `📊 <b>STATS</b>\n\n` +
-        `🔑 Total: ${keys.length}\n` +
-        `🟢 Ativas: ${ativas}\n` +
-        `🔴 Expiradas: ${exp}\n` +
-        `🔗 Vinculadas: ${vinc}\n` +
-        `🔥 Ilimitadas: ${unli}`
+        `📊 <b>STATS</b>\n\n🔑 Total: ${keys.length}\n🟢 Ativas: ${ativas}\n🔴 Expiradas: ${exp}\n🔗 Vinculadas: ${vinc}\n🔥 Ilimitadas: ${unli}`
       );
       return;
     }
@@ -575,88 +632,59 @@ app.post('/telegram-webhook', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════
-// ⚠️ ROTAS API (CORRIGIDAS - v4.1)
+// ROTAS API
 // ═══════════════════════════════════════════════
-
-// ─── Healthcheck MINIMALISTA (não expõe info sensível) ───
 app.get('/', (req, res) => {
-  res.json({ ok:true, service:'mozlince-license-api', version:'4.1' });
+  res.json({ ok:true, service:'mozlince-license-api', version:'4.4' });
 });
 
-// ─── Status MINIMALISTA (sem chave_carregada, sem origem) ───
 app.get('/v1/status', (req, res) => {
-  res.json({ ok:true, service:'mozlince-license-api', version:'4.1', hora:new Date().toISOString() });
+  res.json({ ok:true, service:'mozlince-license-api', version:'4.4', hora:new Date().toISOString() });
 });
 
-// ─── /v1/planos — apenas mostra planos (info pública) ───
 app.get('/v1/planos', (req, res) => {
   res.json({ ok:true, planos: Object.entries(PACOTES).map(([id,p]) => ({ id, nome:p.nome, dias:p.dias, preco:p.preco, emoji:p.emoji })) });
 });
 
-// ═══════════════════════════════════════════════
-// 🔐 /v1/activate — a rota REAL de ativação
-// ⚠️ NUNCA devolve token sem validar a chave!
-// ═══════════════════════════════════════════════
 app.post('/v1/activate', async (req, res) => {
   const inicio = Date.now();
-  const { installId, licenseKey, clientTag, deviceLabel, buildFingerprint, installType } = req.body || {};
+  const { installId, licenseKey } = req.body || {};
 
-  // 1. installId é obrigatório
   if (!installId || typeof installId !== 'string' || installId.length < 5) {
     log('WARN', 'Ativacao sem installId valido');
     return res.status(400).json({ error:'missing_installId', message:'installId obrigatorio' });
   }
-
-  // 2. Chave privada tem de estar carregada
-  if (!PRIVATE_KEY) {
-    return res.status(500).json({ error:'server_misconfigured', message:'Servidor sem chave privada' });
-  }
-
-  // 3. licenseKey é OBRIGATÓRIA — sem chave NÃO devolve token!
+  if (!PRIVATE_KEY) return res.status(500).json({ error:'server_misconfigured', message:'Servidor sem chave privada' });
   if (!licenseKey || typeof licenseKey !== 'string' || !licenseKey.startsWith('ASHEO-')) {
-    log('WARN', `Ativacao SEM chave valida: ${installId} | key=${licenseKey||'(vazia)'}`);
-    return res.status(401).json({ error:'missing_license', message:'licenseKey obrigatoria no formato ASHEO-XXXX-XXXX-XXXX-XXXX' });
+    log('WARN', `Ativacao SEM chave valida: ${installId}`);
+    return res.status(401).json({ error:'missing_license', message:'licenseKey obrigatoria' });
   }
 
-  // 4. Verificar a chave no Redis
   const lic = await redisGet(licenseKey);
-  if (!lic) {
-    log('WARN', `Chave nao encontrada: ${licenseKey.substring(0,18)}...`);
-    return res.status(404).json({ error:'invalid_license', message:'Chave nao encontrada no servidor' });
-  }
-  if (!lic.ativa) {
-    log('WARN', `Chave revogada: ${licenseKey.substring(0,18)}...`);
-    return res.status(403).json({ error:'revoked', message:'Chave revogada' });
-  }
+  if (!lic) { log('WARN', `Chave nao encontrada: ${normalizeKey(licenseKey).substring(0,18)}...`); return res.status(404).json({ error:'invalid_license', message:'Chave nao encontrada no servidor' }); }
+  if (!lic.ativa) { log('WARN', `Chave revogada: ${normalizeKey(licenseKey).substring(0,18)}...`); return res.status(403).json({ error:'revoked', message:'Chave revogada' }); }
 
-  // 5. Vincular ou verificar vínculo
   if (!lic.installId) {
     lic.installId = installId;
     lic.ativadaEm = Date.now();
     await redisSet(licenseKey, JSON.stringify(lic));
-    log('OK', `Vinculada: ${licenseKey.substring(0,18)}... -> ${installId}`);
+    log('OK', `Vinculada: ${normalizeKey(licenseKey).substring(0,18)}... -> ${installId}`);
   } else if (lic.installId !== installId) {
-    log('WARN', `Chave ja vinculada: ${licenseKey.substring(0,18)}... (${lic.installId} != ${installId})`);
     return res.status(403).json({ error:'already_used', message:'Chave ja vinculada a outro dispositivo' });
   }
 
-  // 6. Verificar expiração
-  const expDate = lic.criadaEm + (lic.dias || 30) * 24 * 60 * 60 * 1000;
-  if ((lic.dias || 30) < 3650 && Date.now() > expDate) {
-    log('WARN', `Chave expirada: ${licenseKey.substring(0,18)}...`);
+  if (!lic.ilimitada && Date.now() > lic.expiraEm) {
     return res.status(403).json({ error:'expired', message:'Chave expirada' });
   }
 
-  // 7. Só AGORA gera o token
   try {
-    const token = signToken(buildClaims(installId, lic.plano || 'premium', lic.dias || 30));
-    log('ATIV', `${installId} | ${licenseKey.substring(0,18)}... | ${Date.now()-inicio}ms`);
+    const token = signToken(buildClaims(installId, 'premium', lic.dias || 30));
+    log('ATIV', `${installId} | ${normalizeKey(licenseKey).substring(0,18)}... | ${Date.now()-inicio}ms`);
     return res.json({
-      token,
-      tier:'premium', kind:'premium', seat:1, seats:1, gwPass:null,
-      plan: lic.plano || 'premium', planDisplayName:'Premium',
-      expires_in: Math.floor((expDate - Date.now())/1000),
-      licenseKey
+      token, tier:'premium', kind:'premium', seat:1, seats:1, gwPass:null,
+      plan: 'premium', planDisplayName: 'Premium',
+      expires_in: lic.ilimitada ? -1 : Math.floor((lic.expiraEm - Date.now())/1000),
+      licenseKey: normalizeKey(licenseKey)
     });
   } catch (e) {
     log('ERRO', 'activate sign: ' + e.message);
@@ -664,7 +692,6 @@ app.post('/v1/activate', async (req, res) => {
   }
 });
 
-// ─── /v1/deactivate ───
 app.post('/v1/deactivate', async (req, res) => {
   const { installId, licenseKey } = req.body || {};
   if (licenseKey) {
@@ -677,7 +704,6 @@ app.post('/v1/deactivate', async (req, res) => {
   res.json({ ok:true, message:'Desativado' });
 });
 
-// ─── /v1/verify — só valida token (não gera) ───
 app.post('/v1/verify', (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ error:'missing_token' });
@@ -687,7 +713,6 @@ app.post('/v1/verify', (req, res) => {
   } catch (e) { return res.status(401).json({ valido:false, ok:false, erro:e.message }); }
 });
 
-// ─── Rotas auxiliares (extensão) ───
 app.post('/v1/feature/activate', async (req, res) => {
   const { installId, feature, licenseKey, nonce } = req.body || {};
   if (!installId || !feature || !licenseKey) return res.status(400).json({ ok:false, error:'missing_params' });
@@ -707,8 +732,7 @@ app.get('/v1/rules/sync', (req, res) => {
   res.json({ version:3, updatedAt:new Date().toISOString(), serverRules:[
     { id:'premium_automation', enabled:true, ttl:3600 },
     { id:'multi_account', enabled:true, ttl:3600 },
-    { id:'cloud_sync', enabled:true, ttl:3600 },
-    { id:'bulk_actions', enabled:true, ttl:3600 }
+    { id:'cloud_sync', enabled:true, ttl:3600 }
   ], serverTime:Date.now() });
 });
 
@@ -717,21 +741,12 @@ app.get('/v1/exclusive/sync', (req, res) => {
   if (!installId || !licenseKey) return res.status(401).json({ ok:false, error:'missing_license' });
   res.json({ manifest:{ version:'1.0.0', generatedAt:new Date().toISOString(),
     rules:[{ id:'exclusive_1', type:'allow', pattern:'https://premium.mozlince.com/*' }],
-    gateways:[{ id:'premium-gw', url:'https://premium.mozlince.com/gw', enabled:true }],
     signature:crypto.randomBytes(32).toString('hex')
   }, cachedAt:Date.now() });
 });
 
 app.get('/v1/manifest/check', (req, res) => {
   res.json({ ok:true, latest:'1.0.0', minVersion:'1.0.0', channel:req.query.channel||'stable', serverTime:Date.now() });
-});
-
-app.get('/v1/gateways/defaults', (req, res) => {
-  const { installId, licenseKey } = req.query;
-  if (!installId || !licenseKey) return res.status(401).json({ ok:false, error:'missing_license' });
-  res.json({ ok:true, version:1, gateways:[
-    { id:'default-1', name:'Default', pattern:'https://*.mozlince.com/*', isDefault:true }
-  ], serverTime:Date.now() });
 });
 
 app.post('/verificar-licenca', (req, res) => {
@@ -741,7 +756,7 @@ app.post('/verificar-licenca', (req, res) => {
   catch (err) { res.status(401).json({ valido:false, erro:err.message }); }
 });
 
-// ─── Rotas antigas ───
+// ─── Rotas antigas (compatibilidade) ───
 app.post('/activate', async (req, res) => {
   const { installId, licenseKey } = req.body;
   if (!installId) return res.status(400).json({ erro:'installId obrigatorio' });
@@ -751,8 +766,8 @@ app.post('/activate', async (req, res) => {
   if (!lic.ativa) return res.status(403).json({ erro:'Revogada' });
   if (!lic.installId) { lic.installId = installId; await redisSet(licenseKey, JSON.stringify(lic)); }
   else if (lic.installId !== installId) return res.status(403).json({ erro:'Ja usada' });
-  const token = signToken(buildClaims(installId, lic.plano, lic.dias));
-  return res.json({ token, licenseKey, status:'active', plan:lic.plano, days:lic.dias });
+  const token = signToken(buildClaims(installId, 'premium', lic.dias));
+  return res.json({ token, licenseKey: normalizeKey(licenseKey), status:'active', plan:'premium', days:lic.dias });
 });
 
 // ═══════════════════════════════════════════════
@@ -760,12 +775,11 @@ app.post('/activate', async (req, res) => {
 // ═══════════════════════════════════════════════
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  log('SYS', `Servidor Mozlince v4.1 na porta ${PORT}`);
+  log('SYS', `Servidor Mozlince v4.4 na porta ${PORT}`);
   log('SYS', `Chave: ${ORIGEM}`);
   log('SYS', `Redis: ${UPSTASH_URL ? 'OK' : 'FALTA'}`);
   log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA'}`);
-  log('SYS', `Rotas API ativas: /v1/activate (POST) /v1/deactivate (POST) /v1/verify (POST)`);
-  log('SYS', `Rotas info: /v1/status (minimal) /v1/planos`);
+  log('SYS', `Migracao automatica de licencas ATIVA`);
 });
 
 process.on('uncaughtException', e => log('ERRO','Uncaught: '+e.message));
