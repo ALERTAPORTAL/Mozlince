@@ -7,17 +7,17 @@ const fs = require('fs');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 const C = { r:'\x1b[0m', b:'\x1b[1m', g:'\x1b[32m', y:'\x1b[33m', red:'\x1b[31m', c:'\x1b[36m', m:'\x1b[35m', bl:'\x1b[34m', gr:'\x1b[90m' };
 function log(t, m) {
   const ts = new Date().toISOString().replace('T',' ').substring(0,19);
-  const cores = { INFO:C.c, OK:C.g, WARN:C.y, ERRO:C.red, SYS:C.m, ATIV:C.bl, SYNC:'\x1b[35m', BOT:'\x1b[36m', DBG:'\x1b[33m' };
+  const cores = { INFO:C.c, OK:C.g, WARN:C.y, ERRO:C.red, SYS:C.m, ATIV:C.bl, BOT:C.c };
   console.log(`${C.gr}[${ts}]${C.r} ${cores[t]||C.r}${C.b}[${t}]${C.r} ${m}`);
 }
 
 // ═══════════════════════════════════════════════
-// CHAVES ES256
+// CHAVES
 // ═══════════════════════════════════════════════
 let PRIVATE_KEY = null, PUBLIC_KEY = null, ORIGEM = 'nenhuma';
 (function initKeys() {
@@ -39,8 +39,21 @@ let PRIVATE_KEY = null, PUBLIC_KEY = null, ORIGEM = 'nenhuma';
     }
   }
   if (PRIVATE_KEY) {
-    try { crypto.createPrivateKey(PRIVATE_KEY); log('OK','Chave privada ES256 validada'); }
-    catch (e) { log('ERRO','Chave privada invalida: '+e.message); PRIVATE_KEY = null; }
+    try {
+      const k = crypto.createPrivateKey(PRIVATE_KEY);
+      // Verifica que a chave publica corresponde à privada
+      const jwk = crypto.createPublicKey(k).export({ format:'jwk' });
+      log('OK', 'Chave privada OK');
+      log('DBG', `X: ${jwk.x}`);
+      log('DBG', `Y: ${jwk.y}`);
+      log('DBG', 'Extensão espera X: aTAr_kSTrfocOkpAHlVSDc71E1pc5Pd5KgnE-ggBr_4');
+      log('DBG', 'Extensão espera Y: GFrU897XAPvrxqcRhlwoAwpooKHl69-0YrBaJbfwAT4');
+      if (jwk.x === 'aTAr_kSTrfocOkpAHlVSDc71E1pc5Pd5KgnE-ggBr_4' && jwk.y === 'GFrU897XAPvrxqcRhlwoAwpooKHl69-0YrBaJbfwAT4') {
+        log('OK', '✅ Chave CORRESPONDE à extensão!');
+      } else {
+        log('ERRO', '❌ Chave NÃO corresponde à extensão — vai rejeitar tokens!');
+      }
+    } catch (e) { log('ERRO','Chave privada invalida: '+e.message); PRIVATE_KEY = null; }
   } else { log('ERRO','Nenhuma chave privada encontrada'); }
 })();
 
@@ -49,58 +62,9 @@ const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
-// ═══════════════════════════════════════════════
-// 🔑 NORMALIZAÇÃO DE CHAVES
-// ═══════════════════════════════════════════════
 function normalizeKey(key) {
   if (!key || typeof key !== 'string') return '';
   return key.trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9\-]/g,'');
-}
-
-// ═══════════════════════════════════════════════
-// 🔄 MIGRAÇÃO: formato antigo → novo
-// ═══════════════════════════════════════════════
-function migrarLicenca(lic) {
-  if (!lic || typeof lic !== 'object') return lic;
-  const novo = { ...lic };
-
-  // ─── Plano ───
-  if (!novo.plano && novo.plan) novo.plano = novo.plan === 'premium' ? 'unli' : novo.plan;
-  if (!novo.plano) novo.plano = '30d'; // default
-  if (!novo.planoNome) {
-    const pk = PACOTES[novo.plano];
-    novo.planoNome = pk ? pk.nome : (novo.plan === 'premium' ? 'Ilimitado' : 'Premium');
-  }
-
-  // ─── Dias ───
-  if (typeof novo.dias !== 'number') {
-    novo.dias = typeof novo.days === 'number' ? novo.days : (novo.plano === 'unli' ? 3650 : 30);
-  }
-
-  // ─── Datas ───
-  if (!novo.criadaEm && novo.createdAt) novo.criadaEm = novo.createdAt;
-  if (!novo.criadaEm) novo.criadaEm = Date.now();
-
-  if (typeof novo.ilimitada !== 'boolean') novo.ilimitada = novo.dias >= 3650;
-
-  if (!novo.expiraEm) {
-    if (novo.expiraEmExplicito) novo.expiraEm = novo.expiraEmExplicito;
-    else novo.expiraEm = novo.ilimitada ? novo.criadaEm + 365*24*60*60*1000*10 : novo.criadaEm + novo.dias * 24*60*60*1000;
-  }
-
-  // ─── Ativa ───
-  if (typeof novo.ativa !== 'boolean') novo.ativa = typeof novo.active === 'boolean' ? novo.active : true;
-
-  // ─── Preço ───
-  if (!novo.preco) {
-    const pk = PACOTES[novo.plano];
-    novo.preco = pk ? pk.preco : 'R$ 0,00';
-  }
-
-  // ─── Chave ───
-  if (!novo.chave) novo.chave = null;
-
-  return novo;
 }
 
 // ═══════════════════════════════════════════════
@@ -117,10 +81,7 @@ async function redisGet(key) {
   const res = await fetch(`${UPSTASH_URL}/get/${k}`, { headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}` } });
   const data = await res.json();
   if (!data.result) return null;
-  try {
-    const raw = JSON.parse(data.result);
-    return migrarLicenca(raw);
-  } catch { return null; }
+  try { return migrarLicenca(JSON.parse(data.result)); } catch { return null; }
 }
 async function redisDel(key) {
   const k = normalizeKey(key);
@@ -132,29 +93,70 @@ async function redisKeys(pattern='*') {
   return data.result || [];
 }
 
-// ═══════════════════════════════════════════════
-// HELPERS
-// ═══════════════════════════════════════════════
-function generateLicenseKey() {
-  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const blk=()=>{let s='';for(let i=0;i<4;i++)s+=chars[crypto.randomInt(0,chars.length)];return s;};
-  return `ASHEO-${blk()}-${blk()}-${blk()}-${blk()}`;
+const PACOTES = {
+  '3d':   { nome:'3 Dias',    dias:3,    preco:'R$ 2,99',   emoji:'🥉' },
+  '7d':   { nome:'7 Dias',    dias:7,    preco:'R$ 4,99',   emoji:'🥈' },
+  '15d':  { nome:'15 Dias',   dias:15,   preco:'R$ 7,99',   emoji:'🥇' },
+  '30d':  { nome:'1 Mês',     dias:30,   preco:'R$ 12,99',  emoji:'💎' },
+  '90d':  { nome:'3 Meses',   dias:90,   preco:'R$ 29,99',  emoji:'👑' },
+  '1a':   { nome:'1 Ano',     dias:365,  preco:'R$ 79,99',  emoji:'🏆' },
+  'unli': { nome:'ILIMITADO', dias:3650, preco:'R$ 149,99', emoji:'🔥' }
+};
+
+function migrarLicenca(lic) {
+  if (!lic || typeof lic !== 'object') return lic;
+  const novo = { ...lic };
+  if (!novo.plano && novo.plan) novo.plano = novo.plan === 'premium' ? 'unli' : novo.plan;
+  if (!novo.plano) novo.plano = '30d';
+  if (!novo.planoNome) {
+    const pk = PACOTES[novo.plano];
+    novo.planoNome = pk ? pk.nome : (novo.plan === 'premium' ? 'Ilimitado' : 'Premium');
+  }
+  if (typeof novo.dias !== 'number') novo.dias = typeof novo.days === 'number' ? novo.days : (novo.plano === 'unli' ? 3650 : 30);
+  if (!novo.criadaEm && novo.createdAt) novo.criadaEm = novo.createdAt;
+  if (!novo.criadaEm) novo.criadaEm = Date.now();
+  if (typeof novo.ilimitada !== 'boolean') novo.ilimitada = novo.dias >= 3650;
+  if (!novo.expiraEm) novo.expiraEm = novo.ilimitada ? novo.criadaEm + 365*24*60*60*1000*10 : novo.criadaEm + novo.dias * 24*60*60*1000;
+  if (typeof novo.ativa !== 'boolean') novo.ativa = typeof novo.active === 'boolean' ? novo.active : true;
+  if (!novo.preco) { const pk = PACOTES[novo.plano]; novo.preco = pk ? pk.preco : 'R$ 0,00'; }
+  return novo;
 }
 
+// ═══════════════════════════════════════════════
+// JWT — EXATAMENTE o que a extensão espera
+// ═══════════════════════════════════════════════
 function buildClaims(installId, plan, days) {
   const now = Math.floor(Date.now()/1000);
   const isUnli = days >= 3650;
+  const exp = isUnli ? now + (365*24*60*60*10) : now + (days*24*60*60);
   return {
-    sub: installId, iss:'mozlince-license-api', aud:'mozlince-client',
-    installId, status:'active', plan, planDisplayName: plan==='premium'?'Premium':plan,
-    tier: plan==='premium'?'premium':'free', kind: plan==='premium'?'premium':'free',
-    active:true, isPremium:true, isVerified:true,
-    features:{advanced_automation:true,multi_account:true,cloud_sync:true,priority_support:true,custom_export:true,api_access:true},
-    capabilities:{bulk_actions:true,advanced_analytics:true,custom_webhooks:true},
-    limits:{max_accounts:-1,daily_actions:-1,max_templates:-1,history_days:-1,export_limit:-1},
-    secret:'segredo-'+installId,
-    iat:now, nbf:now-5,
-    exp: isUnli ? now+(365*24*60*60*10) : now+(days*24*60*60),
+    sub: installId,                              // ← INSTALL ID (extensão verifica isto)
+    iss: 'mozlince-license-api',
+    aud: 'mozlince-client',
+    installId: installId,
+    status: 'active',
+    plan: plan === 'premium' ? 'premium' : plan,
+    planDisplayName: 'Premium',
+    tier: 'premium',                             // ← extensão usa isto para snapshot
+    kind: 'premium',
+    active: true,
+    isPremium: true,
+    isVerified: true,
+    features: {
+      advanced_automation: true, multi_account: true, cloud_sync: true,
+      priority_support: true, custom_export: true, api_access: true
+    },
+    capabilities: {
+      bulk_actions: true, advanced_analytics: true, custom_webhooks: true
+    },
+    limits: {
+      max_accounts: -1, daily_actions: -1, max_templates: -1,
+      history_days: -1, export_limit: -1
+    },
+    secret: 'segredo-' + installId,
+    iat: now,
+    nbf: now - 5,
+    exp: exp,
     jti: crypto.randomUUID()
   };
 }
@@ -176,34 +178,21 @@ function humanTime(ms) {
   if (h > 0) return `${h}h ${m}m`;
   return `${m}m`;
 }
-
-const PACOTES = {
-  '3d':   { nome:'3 Dias',    dias:3,    preco:'R$ 2,99',   emoji:'🥉' },
-  '7d':   { nome:'7 Dias',    dias:7,    preco:'R$ 4,99',   emoji:'🥈' },
-  '15d':  { nome:'15 Dias',   dias:15,   preco:'R$ 7,99',   emoji:'🥇' },
-  '30d':  { nome:'1 Mês',     dias:30,   preco:'R$ 12,99',  emoji:'💎' },
-  '90d':  { nome:'3 Meses',   dias:90,   preco:'R$ 29,99',  emoji:'👑' },
-  '1a':   { nome:'1 Ano',     dias:365,  preco:'R$ 79,99',  emoji:'🏆' },
-  'unli': { nome:'ILIMITADO', dias:3650, preco:'R$ 149,99', emoji:'🔥' }
-};
+function generateLicenseKey() {
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const blk=()=>{let s='';for(let i=0;i<4;i++)s+=chars[crypto.randomInt(0,chars.length)];return s;};
+  return `ASHEO-${blk()}-${blk()}-${blk()}-${blk()}`;
+}
 
 // ═══════════════════════════════════════════════
 // TELEGRAM
 // ═══════════════════════════════════════════════
 const TG_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 async function tgSend(chatId, text, keyboard=null) {
-  try {
-    const body = { chat_id:chatId, text, parse_mode:'HTML', disable_web_page_preview:true };
-    if (keyboard) body.reply_markup = keyboard;
-    await fetch(`${TG_API}/sendMessage`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-  } catch (e) { log('ERRO','tgSend: '+e.message); }
+  try { const body = { chat_id:chatId, text, parse_mode:'HTML', disable_web_page_preview:true }; if (keyboard) body.reply_markup = keyboard; await fetch(`${TG_API}/sendMessage`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); } catch (e) {}
 }
 async function tgEdit(chatId, messageId, text, keyboard=null) {
-  try {
-    const body = { chat_id:chatId, message_id:messageId, text, parse_mode:'HTML', disable_web_page_preview:true };
-    if (keyboard) body.reply_markup = keyboard;
-    await fetch(`${TG_API}/editMessageText`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) });
-  } catch (e) { log('ERRO','tgEdit: '+e.message); }
+  try { const body = { chat_id:chatId, message_id:messageId, text, parse_mode:'HTML', disable_web_page_preview:true }; if (keyboard) body.reply_markup = keyboard; await fetch(`${TG_API}/editMessageText`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body) }); } catch (e) {}
 }
 async function tgAnswer(id, text='') {
   try { await fetch(`${TG_API}/answerCallbackQuery`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ callback_query_id:id, text }) }); } catch {}
@@ -216,11 +205,9 @@ function menuPrincipal() {
   const texto =
     `╔══════════════════════════════════════╗\n` +
     `║   👑 <b>MOZLINCE LICENSE PANEL</b> 👑   ║\n` +
-    `║      <i>Premium Edition v4.4</i>         ║\n` +
+    `║      <i>Premium Edition v4.5</i>         ║\n` +
     `╚══════════════════════════════════════╝\n\n` +
     `🎯 <b>Painel de Controle Premium</b>\n\n` +
-    `💎 <i>Sistema completo de licenças</i>\n` +
-    `🔐 <i>Validação em tempo real</i>\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `✨ <b>Selecione uma ação:</b>`;
   return { texto, teclado: { inline_keyboard: [
@@ -374,7 +361,7 @@ async function handleCallback(cb) {
 
     if (data === 'm_contacto') {
       await tgAnswer(cb.id, '📞 Enviado!');
-      await tgEdit(chatId, msgId, `📞 <b>CONTACTAR ADMIN</b>\n\n✅ Pedido enviado!\n\nO admin responderá em breve.`, { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:'m_home' }]] });
+      await tgEdit(chatId, msgId, `📞 <b>CONTACTAR ADMIN</b>\n\n✅ Pedido enviado!`, { inline_keyboard: [[{ text:'🔙 Voltar', callback_data:'m_home' }]] });
       if (userId !== String(OWNER_ID)) await tgSend(OWNER_ID, `📞 Pedido\n👤 ${cb.from.first_name||'?'}\n💬 <code>${chatId}</code>`);
       return;
     }
@@ -478,9 +465,6 @@ async function handleCallback(cb) {
   } catch (e) { log('ERRO','Callback: '+e.message); await tgAnswer(cb.id, '❌ Erro: '+e.message); }
 }
 
-// ═══════════════════════════════════════════════
-// HANDLER MENSAGENS
-// ═══════════════════════════════════════════════
 async function handleMessage(msg) {
   const chatId = msg.chat.id;
   const userId = String(msg.from.id);
@@ -490,7 +474,7 @@ async function handleMessage(msg) {
 
   if (userId !== String(OWNER_ID)) {
     if (cmd === '/start' || cmd === '/contacto') {
-      await tgSend(chatId, `👋 <b>Bem-vindo!</b>\n\nPara contactar o admin:`,
+      await tgSend(chatId, `👋 <b>Bem-vindo!</b>`,
         { inline_keyboard: [[{ text:'📞 CONTACTAR ADMIN', callback_data:'m_contacto' }]] });
       return;
     }
@@ -539,8 +523,7 @@ async function handleMessage(msg) {
         `⏰ ${l.ilimitada?'Nunca':formatDate(l.expiraEm)}\n` +
         `⌛ ${resta}\n` +
         `🔗 ${l.installId?`<code>${l.installId}</code>`:'Não vinculada'}\n` +
-        `📌 ${l.ativa?'🟢 Ativa':'🔴 Inativa'}`,
-        { inline_keyboard: [[{ text:'🗑️ Deletar', callback_data:`dl_${k}` }, { text:'❌ Revogar', callback_data:`rv_${k}` }]] }
+        `📌 ${l.ativa?'🟢 Ativa':'🔴 Inativa'}`
       );
       return;
     }
@@ -632,59 +615,85 @@ app.post('/telegram-webhook', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════
-// ROTAS API
+// API — EXATAMENTE O QUE A EXTENSÃO ESPERA
 // ═══════════════════════════════════════════════
+
 app.get('/', (req, res) => {
-  res.json({ ok:true, service:'mozlince-license-api', version:'4.4' });
+  res.json({ ok:true, service:'mozlince-license-api', version:'4.5' });
 });
 
 app.get('/v1/status', (req, res) => {
-  res.json({ ok:true, service:'mozlince-license-api', version:'4.4', hora:new Date().toISOString() });
+  res.json({ ok:true, service:'mozlince-license-api', version:'4.5', hora:new Date().toISOString() });
 });
 
 app.get('/v1/planos', (req, res) => {
   res.json({ ok:true, planos: Object.entries(PACOTES).map(([id,p]) => ({ id, nome:p.nome, dias:p.dias, preco:p.preco, emoji:p.emoji })) });
 });
 
+// ─── ATIVAÇÃO ───
 app.post('/v1/activate', async (req, res) => {
   const inicio = Date.now();
-  const { installId, licenseKey } = req.body || {};
+  const { installId, licenseKey, clientTag, deviceLabel, buildFingerprint, installType } = req.body || {};
+
+  log('INFO', `Ativacao: installId=${installId || '?'} | key=${licenseKey ? normalizeKey(licenseKey).substring(0,18)+'...' : '(vazia)'} | client=${clientTag || '?'}`);
 
   if (!installId || typeof installId !== 'string' || installId.length < 5) {
     log('WARN', 'Ativacao sem installId valido');
     return res.status(400).json({ error:'missing_installId', message:'installId obrigatorio' });
   }
-  if (!PRIVATE_KEY) return res.status(500).json({ error:'server_misconfigured', message:'Servidor sem chave privada' });
-  if (!licenseKey || typeof licenseKey !== 'string' || !licenseKey.startsWith('ASHEO-')) {
+  if (!PRIVATE_KEY) {
+    log('ERRO', 'Servidor sem chave privada');
+    return res.status(500).json({ error:'server_misconfigured', message:'Servidor sem chave privada' });
+  }
+  if (!licenseKey || typeof licenseKey !== 'string' || !licenseKey.toUpperCase().startsWith('ASHEO-')) {
     log('WARN', `Ativacao SEM chave valida: ${installId}`);
-    return res.status(401).json({ error:'missing_license', message:'licenseKey obrigatoria' });
+    return res.status(401).json({ error:'missing_license', message:'licenseKey obrigatoria (formato ASHEO-XXXX-XXXX-XXXX-XXXX)' });
   }
 
-  const lic = await redisGet(licenseKey);
-  if (!lic) { log('WARN', `Chave nao encontrada: ${normalizeKey(licenseKey).substring(0,18)}...`); return res.status(404).json({ error:'invalid_license', message:'Chave nao encontrada no servidor' }); }
-  if (!lic.ativa) { log('WARN', `Chave revogada: ${normalizeKey(licenseKey).substring(0,18)}...`); return res.status(403).json({ error:'revoked', message:'Chave revogada' }); }
+  const keyNorm = normalizeKey(licenseKey);
+  const lic = await redisGet(keyNorm);
+
+  if (!lic) {
+    log('WARN', `Chave NAO ENCONTRADA no Redis: ${keyNorm.substring(0,18)}...`);
+    return res.status(404).json({ error:'invalid_license', message:'Chave nao encontrada no servidor' });
+  }
+
+  if (!lic.ativa) {
+    log('WARN', `Chave REVOGADA: ${keyNorm.substring(0,18)}...`);
+    return res.status(403).json({ error:'revoked', message:'Chave revogada' });
+  }
 
   if (!lic.installId) {
     lic.installId = installId;
     lic.ativadaEm = Date.now();
-    await redisSet(licenseKey, JSON.stringify(lic));
-    log('OK', `Vinculada: ${normalizeKey(licenseKey).substring(0,18)}... -> ${installId}`);
+    await redisSet(keyNorm, JSON.stringify(lic));
+    log('OK', `Vinculada: ${keyNorm.substring(0,18)}... -> ${installId}`);
   } else if (lic.installId !== installId) {
+    log('WARN', `JA VINCULADA: ${keyNorm.substring(0,18)}... (${lic.installId} != ${installId})`);
     return res.status(403).json({ error:'already_used', message:'Chave ja vinculada a outro dispositivo' });
   }
 
   if (!lic.ilimitada && Date.now() > lic.expiraEm) {
+    log('WARN', `EXPIRADA: ${keyNorm.substring(0,18)}...`);
     return res.status(403).json({ error:'expired', message:'Chave expirada' });
   }
 
+  // ✅ SUCESSO — gera token exatamente no formato que a extensão espera
   try {
     const token = signToken(buildClaims(installId, 'premium', lic.dias || 30));
-    log('ATIV', `${installId} | ${normalizeKey(licenseKey).substring(0,18)}... | ${Date.now()-inicio}ms`);
+    log('ATIV', `✅ ${installId} | ${keyNorm.substring(0,18)}... | ${Date.now()-inicio}ms`);
+
     return res.json({
-      token, tier:'premium', kind:'premium', seat:1, seats:1, gwPass:null,
-      plan: 'premium', planDisplayName: 'Premium',
+      token,                                    // ← extensão espera isto
+      tier: 'premium',                          // ← extensão usa
+      kind: 'premium',
+      seat: 1,
+      seats: 1,
+      gwPass: null,
+      plan: 'premium',
+      planDisplayName: 'Premium',
       expires_in: lic.ilimitada ? -1 : Math.floor((lic.expiraEm - Date.now())/1000),
-      licenseKey: normalizeKey(licenseKey)
+      licenseKey: keyNorm
     });
   } catch (e) {
     log('ERRO', 'activate sign: ' + e.message);
@@ -756,30 +765,16 @@ app.post('/verificar-licenca', (req, res) => {
   catch (err) { res.status(401).json({ valido:false, erro:err.message }); }
 });
 
-// ─── Rotas antigas (compatibilidade) ───
-app.post('/activate', async (req, res) => {
-  const { installId, licenseKey } = req.body;
-  if (!installId) return res.status(400).json({ erro:'installId obrigatorio' });
-  if (!licenseKey || !licenseKey.startsWith('ASHEO-')) return res.status(401).json({ erro:'licenseKey obrigatoria' });
-  const lic = await redisGet(licenseKey);
-  if (!lic) return res.status(404).json({ erro:'Chave invalida' });
-  if (!lic.ativa) return res.status(403).json({ erro:'Revogada' });
-  if (!lic.installId) { lic.installId = installId; await redisSet(licenseKey, JSON.stringify(lic)); }
-  else if (lic.installId !== installId) return res.status(403).json({ erro:'Ja usada' });
-  const token = signToken(buildClaims(installId, 'premium', lic.dias));
-  return res.json({ token, licenseKey: normalizeKey(licenseKey), status:'active', plan:'premium', days:lic.dias });
-});
-
 // ═══════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  log('SYS', `Servidor Mozlince v4.4 na porta ${PORT}`);
+  log('SYS', `Servidor Mozlince v4.5 na porta ${PORT}`);
   log('SYS', `Chave: ${ORIGEM}`);
   log('SYS', `Redis: ${UPSTASH_URL ? 'OK' : 'FALTA'}`);
   log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA'}`);
-  log('SYS', `Migracao automatica de licencas ATIVA`);
+  log('SYS', `Rotas: /v1/activate /v1/deactivate /v1/verify /v1/status /v1/planos`);
 });
 
 process.on('uncaughtException', e => log('ERRO','Uncaught: '+e.message));
