@@ -41,17 +41,14 @@ let PRIVATE_KEY = null, PUBLIC_KEY = null, ORIGEM = 'nenhuma';
   if (PRIVATE_KEY) {
     try {
       const k = crypto.createPrivateKey(PRIVATE_KEY);
-      // Verifica que a chave publica corresponde à privada
       const jwk = crypto.createPublicKey(k).export({ format:'jwk' });
       log('OK', 'Chave privada OK');
       log('DBG', `X: ${jwk.x}`);
       log('DBG', `Y: ${jwk.y}`);
-      log('DBG', 'Extensão espera X: aTAr_kSTrfocOkpAHlVSDc71E1pc5Pd5KgnE-ggBr_4');
-      log('DBG', 'Extensão espera Y: GFrU897XAPvrxqcRhlwoAwpooKHl69-0YrBaJbfwAT4');
       if (jwk.x === 'aTAr_kSTrfocOkpAHlVSDc71E1pc5Pd5KgnE-ggBr_4' && jwk.y === 'GFrU897XAPvrxqcRhlwoAwpooKHl69-0YrBaJbfwAT4') {
         log('OK', '✅ Chave CORRESPONDE à extensão!');
       } else {
-        log('ERRO', '❌ Chave NÃO corresponde à extensão — vai rejeitar tokens!');
+        log('ERRO', '❌ Chave NÃO corresponde à extensão');
       }
     } catch (e) { log('ERRO','Chave privada invalida: '+e.message); PRIVATE_KEY = null; }
   } else { log('ERRO','Nenhuma chave privada encontrada'); }
@@ -62,14 +59,67 @@ const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
+// ═══════════════════════════════════════════════
+// 🔥 PREMIUM DEFINITIONS — nomes EXATOS da extensão
+// Baseado em entitlement.js / premium-gate.js
+// ═══════════════════════════════════════════════
+const PREMIUM_FEATURES = {
+  // Do entitlement.js — FEATURES que a extensão verifica
+  browser_mods:         { enabled: true, label: 'Browser Mods',         description: 'Spoof fingerprint and rotate user-agent' },
+  rule_ops_lab:         { enabled: true, label: 'Rule Ops Lab',         description: 'Bulk rule ops, presets, conflict scan' },
+  live_injection_hud:   { enabled: true, label: 'Live Injection HUD',   description: 'On-page overlay showing each card swap' },
+  algo_v2:              { enabled: true, label: 'Algo V2',              description: 'Advanced algorithm v2' },
+  exclusive_rules:      { enabled: true, label: 'Exclusive Rules',      description: 'Premium server rules' },
+  advanced_automation:  { enabled: true, label: 'Advanced Automation',  description: 'Automation premium' },
+  multi_account:        { enabled: true, label: 'Multi Account',        description: 'Multiple accounts support' },
+  custom_export:        { enabled: true, label: 'Custom Export',        description: 'Export custom data' },
+  api_access:           { enabled: true, label: 'API Access',           description: 'Direct API access' }
+};
+
+const PREMIUM_CAPABILITIES = {
+  priority_support: { enabled: true, label: 'Priority Support',   description: 'Atendimento prioritário' },
+  custom_webhooks:  { enabled: true, label: 'Custom Webhooks',    description: 'Webhooks personalizados' },
+  cloud_sync:       { enabled: true, label: 'Cloud Sync',         description: 'Sincronização na cloud' },
+  bulk_actions:     { enabled: true, label: 'Bulk Actions',       description: 'Ações em massa' },
+  advanced_analytics:{ enabled: true, label: 'Advanced Analytics',description: 'Analytics avançado' }
+};
+
+const PREMIUM_LIMITS = {
+  max_accounts: Infinity,
+  daily_actions: Infinity,
+  max_templates: Infinity,
+  history_days: Infinity,
+  export_limit: Infinity
+};
+
+const FREE_LIMITS = {
+  max_accounts: 1,
+  daily_actions: 20,
+  max_templates: 3,
+  history_days: 3,
+  export_limit: 5
+};
+
+// Helper: mapeia features para o formato { nome: true } que a extensão lê
+function mapFeatures(enabled) {
+  const out = {};
+  for (const [k, v] of Object.entries(PREMIUM_FEATURES)) out[k] = enabled ? v.enabled : false;
+  return out;
+}
+function mapCapabilities(enabled) {
+  const out = {};
+  for (const [k, v] of Object.entries(PREMIUM_CAPABILITIES)) out[k] = enabled ? v.enabled : false;
+  return out;
+}
+
+// ═══════════════════════════════════════════════
+// CHAVES + REDIS
+// ═══════════════════════════════════════════════
 function normalizeKey(key) {
   if (!key || typeof key !== 'string') return '';
   return key.trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9\-]/g,'');
 }
 
-// ═══════════════════════════════════════════════
-// REDIS
-// ═══════════════════════════════════════════════
 async function redisSet(key, value) {
   const k = normalizeKey(key);
   const res = await fetch(`${UPSTASH_URL}/set/${k}`, { method:'POST', headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}`, 'Content-Type':'application/json' }, body:value });
@@ -123,37 +173,44 @@ function migrarLicenca(lic) {
 }
 
 // ═══════════════════════════════════════════════
-// JWT — EXATAMENTE o que a extensão espera
+// 🔥 JWT — EXATAMENTE o que a extensão espera
 // ═══════════════════════════════════════════════
-function buildClaims(installId, plan, days) {
+function buildClaims(installId, lic) {
   const now = Math.floor(Date.now()/1000);
-  const isUnli = days >= 3650;
+  const isUnli = lic && lic.ilimitada;
+  const days = lic && lic.dias ? lic.dias : 30;
   const exp = isUnli ? now + (365*24*60*60*10) : now + (days*24*60*60);
+
   return {
-    sub: installId,                              // ← INSTALL ID (extensão verifica isto)
+    // ─── Identity ───
+    sub: installId,                              // ← extensão verifica isto
     iss: 'mozlince-license-api',
     aud: 'mozlince-client',
     installId: installId,
-    status: 'active',
-    plan: plan === 'premium' ? 'premium' : plan,
+
+    // ─── Plano ───
+    plan: 'premium',
     planDisplayName: 'Premium',
-    tier: 'premium',                             // ← extensão usa isto para snapshot
+    tier: 'premium',                             // ← extensão usa para snapshot
     kind: 'premium',
+    status: 'active',
     active: true,
     isPremium: true,
     isVerified: true,
-    features: {
-      advanced_automation: true, multi_account: true, cloud_sync: true,
-      priority_support: true, custom_export: true, api_access: true
-    },
-    capabilities: {
-      bulk_actions: true, advanced_analytics: true, custom_webhooks: true
-    },
-    limits: {
-      max_accounts: -1, daily_actions: -1, max_templates: -1,
-      history_days: -1, export_limit: -1
-    },
+
+    // ─── Features (NOMES REAIS da extensão) ───
+    features: mapFeatures(true),
+
+    // ─── Capabilities ───
+    capabilities: mapCapabilities(true),
+
+    // ─── Limits (tudo ilimitado) ───
+    limits: { ...PREMIUM_LIMITS },
+
+    // ─── Secret para HMAC ───
     secret: 'segredo-' + installId,
+
+    // ─── Timestamps ───
     iat: now,
     nbf: now - 5,
     exp: exp,
@@ -199,15 +256,17 @@ async function tgAnswer(id, text='') {
 }
 
 // ═══════════════════════════════════════════════
-// MENUS
+// MENUS DO BOT
 // ═══════════════════════════════════════════════
 function menuPrincipal() {
   const texto =
     `╔══════════════════════════════════════╗\n` +
     `║   👑 <b>MOZLINCE LICENSE PANEL</b> 👑   ║\n` +
-    `║      <i>Premium Edition v4.5</i>         ║\n` +
+    `║      <i>Premium Edition v4.6</i>         ║\n` +
     `╚══════════════════════════════════════╝\n\n` +
     `🎯 <b>Painel de Controle Premium</b>\n\n` +
+    `💎 Features premium integradas\n` +
+    `🔐 JWT com capabilities completas\n\n` +
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
     `✨ <b>Selecione uma ação:</b>`;
   return { texto, teclado: { inline_keyboard: [
@@ -229,7 +288,7 @@ async function cmdStart(chatId, msgId=null) {
 }
 
 // ═══════════════════════════════════════════════
-// HANDLERS
+// HANDLERS DO BOT
 // ═══════════════════════════════════════════════
 async function handleCallback(cb) {
   const chatId = cb.message.chat.id;
@@ -354,7 +413,7 @@ async function handleCallback(cb) {
       await tgAnswer(cb.id);
       let txt = `💰 <b>TABELA DE PREÇOS</b>\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
       for (const [,p] of Object.entries(PACOTES)) txt += `${p.emoji} <b>${p.nome}</b> — <code>${p.preco}</code>\n`;
-      txt += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💎 <i>Todos incluem:</i>\n✅ Premium completo\n✅ Multi-dispositivo\n✅ Suporte prioritário`;
+      txt += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n💎 <i>Todos incluem:</i>\n✅ Browser Mods\n✅ Rule Ops Lab\n✅ Live Injection HUD\n✅ Algo V2\n✅ Suporte prioritário`;
       await tgEdit(chatId, msgId, txt, { inline_keyboard: [[{ text:'📞 COMPRAR', callback_data:'m_contacto' }], [{ text:'🔙 Voltar', callback_data:'m_home' }]] });
       return;
     }
@@ -619,18 +678,29 @@ app.post('/telegram-webhook', async (req, res) => {
 // ═══════════════════════════════════════════════
 
 app.get('/', (req, res) => {
-  res.json({ ok:true, service:'mozlince-license-api', version:'4.5' });
+  res.json({ ok:true, service:'mozlince-license-api', version:'4.6' });
 });
 
 app.get('/v1/status', (req, res) => {
-  res.json({ ok:true, service:'mozlince-license-api', version:'4.5', hora:new Date().toISOString() });
+  res.json({ ok:true, service:'mozlince-license-api', version:'4.6', hora:new Date().toISOString() });
+});
+
+// 🔥 Endpoint que a extensão consulta para saber features/capabilities
+app.get('/v1/premium/definitions', (req, res) => {
+  res.json({
+    ok: true,
+    features: PREMIUM_FEATURES,
+    capabilities: PREMIUM_CAPABILITIES,
+    premiumLimits: PREMIUM_LIMITS,
+    freeLimits: FREE_LIMITS,
+    version: '1.6.2'
+  });
 });
 
 app.get('/v1/planos', (req, res) => {
   res.json({ ok:true, planos: Object.entries(PACOTES).map(([id,p]) => ({ id, nome:p.nome, dias:p.dias, preco:p.preco, emoji:p.emoji })) });
 });
 
-// ─── ATIVAÇÃO ───
 app.post('/v1/activate', async (req, res) => {
   const inicio = Date.now();
   const { installId, licenseKey, clientTag, deviceLabel, buildFingerprint, installType } = req.body || {};
@@ -638,16 +708,13 @@ app.post('/v1/activate', async (req, res) => {
   log('INFO', `Ativacao: installId=${installId || '?'} | key=${licenseKey ? normalizeKey(licenseKey).substring(0,18)+'...' : '(vazia)'} | client=${clientTag || '?'}`);
 
   if (!installId || typeof installId !== 'string' || installId.length < 5) {
-    log('WARN', 'Ativacao sem installId valido');
     return res.status(400).json({ error:'missing_installId', message:'installId obrigatorio' });
   }
   if (!PRIVATE_KEY) {
-    log('ERRO', 'Servidor sem chave privada');
     return res.status(500).json({ error:'server_misconfigured', message:'Servidor sem chave privada' });
   }
   if (!licenseKey || typeof licenseKey !== 'string' || !licenseKey.toUpperCase().startsWith('ASHEO-')) {
-    log('WARN', `Ativacao SEM chave valida: ${installId}`);
-    return res.status(401).json({ error:'missing_license', message:'licenseKey obrigatoria (formato ASHEO-XXXX-XXXX-XXXX-XXXX)' });
+    return res.status(401).json({ error:'missing_license', message:'licenseKey obrigatoria' });
   }
 
   const keyNorm = normalizeKey(licenseKey);
@@ -669,23 +736,21 @@ app.post('/v1/activate', async (req, res) => {
     await redisSet(keyNorm, JSON.stringify(lic));
     log('OK', `Vinculada: ${keyNorm.substring(0,18)}... -> ${installId}`);
   } else if (lic.installId !== installId) {
-    log('WARN', `JA VINCULADA: ${keyNorm.substring(0,18)}... (${lic.installId} != ${installId})`);
+    log('WARN', `JA VINCULADA: ${keyNorm.substring(0,18)}...`);
     return res.status(403).json({ error:'already_used', message:'Chave ja vinculada a outro dispositivo' });
   }
 
   if (!lic.ilimitada && Date.now() > lic.expiraEm) {
-    log('WARN', `EXPIRADA: ${keyNorm.substring(0,18)}...`);
     return res.status(403).json({ error:'expired', message:'Chave expirada' });
   }
 
-  // ✅ SUCESSO — gera token exatamente no formato que a extensão espera
   try {
-    const token = signToken(buildClaims(installId, 'premium', lic.dias || 30));
+    const token = signToken(buildClaims(installId, lic));
     log('ATIV', `✅ ${installId} | ${keyNorm.substring(0,18)}... | ${Date.now()-inicio}ms`);
 
     return res.json({
       token,                                    // ← extensão espera isto
-      tier: 'premium',                          // ← extensão usa
+      tier: 'premium',
       kind: 'premium',
       seat: 1,
       seats: 1,
@@ -728,9 +793,18 @@ app.post('/v1/feature/activate', async (req, res) => {
   const lic = await redisGet(licenseKey);
   if (!lic || !lic.ativa) return res.status(403).json({ ok:false, error:'invalid_license' });
   if (lic.installId && lic.installId !== installId) return res.status(403).json({ ok:false, error:'already_used' });
+
+  // Verifica se a feature existe
+  if (!PREMIUM_FEATURES[feature]) {
+    return res.status(404).json({ ok:false, error:'unknown_feature', message:'Feature nao existe' });
+  }
+
   try {
     const now = Math.floor(Date.now()/1000);
-    const token = jwt.sign({ sub:installId, feature, nonce:nonce||crypto.randomUUID(), iat:now, nbf:now-5, exp:now+300, jti:crypto.randomUUID() }, PRIVATE_KEY, { algorithm:'ES256' });
+    const token = jwt.sign({
+      sub:installId, feature, nonce:nonce||crypto.randomUUID(),
+      iat:now, nbf:now-5, exp:now+300, jti:crypto.randomUUID()
+    }, PRIVATE_KEY, { algorithm:'ES256' });
     return res.json({ ok:true, token, feature, expires_in:300 });
   } catch (e) { return res.status(500).json({ ok:false, error:'internal' }); }
 });
@@ -739,9 +813,11 @@ app.get('/v1/rules/sync', (req, res) => {
   const { installId, licenseKey } = req.query;
   if (!installId || !licenseKey) return res.status(401).json({ ok:false, error:'missing_license' });
   res.json({ version:3, updatedAt:new Date().toISOString(), serverRules:[
-    { id:'premium_automation', enabled:true, ttl:3600 },
-    { id:'multi_account', enabled:true, ttl:3600 },
-    { id:'cloud_sync', enabled:true, ttl:3600 }
+    { id:'browser_mods', enabled:true, ttl:3600 },
+    { id:'rule_ops_lab', enabled:true, ttl:3600 },
+    { id:'live_injection_hud', enabled:true, ttl:3600 },
+    { id:'algo_v2', enabled:true, ttl:3600 },
+    { id:'exclusive_rules', enabled:true, ttl:3600 }
   ], serverTime:Date.now() });
 });
 
@@ -750,12 +826,21 @@ app.get('/v1/exclusive/sync', (req, res) => {
   if (!installId || !licenseKey) return res.status(401).json({ ok:false, error:'missing_license' });
   res.json({ manifest:{ version:'1.0.0', generatedAt:new Date().toISOString(),
     rules:[{ id:'exclusive_1', type:'allow', pattern:'https://premium.mozlince.com/*' }],
+    gateways:[{ id:'premium-gw', url:'https://premium.mozlince.com/gw', enabled:true }],
     signature:crypto.randomBytes(32).toString('hex')
   }, cachedAt:Date.now() });
 });
 
 app.get('/v1/manifest/check', (req, res) => {
   res.json({ ok:true, latest:'1.0.0', minVersion:'1.0.0', channel:req.query.channel||'stable', serverTime:Date.now() });
+});
+
+app.get('/v1/gateways/defaults', (req, res) => {
+  const { installId, licenseKey } = req.query;
+  if (!installId || !licenseKey) return res.status(401).json({ ok:false, error:'missing_license' });
+  res.json({ ok:true, version:1, gateways:[
+    { id:'default-1', name:'Default', pattern:'https://*.mozlince.com/*', isDefault:true }
+  ], serverTime:Date.now() });
 });
 
 app.post('/verificar-licenca', (req, res) => {
@@ -770,11 +855,13 @@ app.post('/verificar-licenca', (req, res) => {
 // ═══════════════════════════════════════════════
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  log('SYS', `Servidor Mozlince v4.5 na porta ${PORT}`);
+  log('SYS', `Servidor Mozlince v4.6 na porta ${PORT}`);
   log('SYS', `Chave: ${ORIGEM}`);
   log('SYS', `Redis: ${UPSTASH_URL ? 'OK' : 'FALTA'}`);
   log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA'}`);
-  log('SYS', `Rotas: /v1/activate /v1/deactivate /v1/verify /v1/status /v1/planos`);
+  log('SYS', `Features premium: ${Object.keys(PREMIUM_FEATURES).length}`);
+  log('SYS', `Capabilities: ${Object.keys(PREMIUM_CAPABILITIES).length}`);
+  log('SYS', `Rotas: /v1/activate /v1/premium/definitions /v1/feature/activate`);
 });
 
 process.on('uncaughtException', e => log('ERRO','Uncaught: '+e.message));
