@@ -8,7 +8,7 @@ const fs = require('fs');
 const app = express();
 
 // ═══════════════════════════════════════════════
-// CORS — permite chrome-extension://
+// CORS
 // ═══════════════════════════════════════════════
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -95,8 +95,6 @@ const PREMIUM_CAPABILITIES = {
 
 const PREMIUM_LIMITS = { max_accounts: -1, daily_actions: -1, max_templates: -1, history_days: -1, export_limit: -1 };
 const FREE_LIMITS = { max_accounts: 1, daily_actions: 20, max_templates: 3, history_days: 3, export_limit: 5 };
-
-// 🔥 SCOPE completo (baseado nas imagens)
 const PREMIUM_SCOPE = ['bypasser', 'cardfiller', 'cvv', 'premium', 'browserMods', 'persona', 'rules', 'gateways', 'exclusive'];
 
 function mapFeatures(on) { const o = {}; for (const [k,v] of Object.entries(PREMIUM_FEATURES)) o[k] = on ? v.enabled : false; return o; }
@@ -160,7 +158,7 @@ function migrarLicenca(lic) {
 }
 
 // ═══════════════════════════════════════════════
-// JWT
+// JWT — COM SOURCE PREMIUM
 // ═══════════════════════════════════════════════
 function buildClaims(installId, lic) {
   const now = Math.floor(Date.now()/1000);
@@ -168,10 +166,13 @@ function buildClaims(installId, lic) {
   const days = lic && lic.dias ? lic.dias : 30;
   const exp = isUnli ? now + (365*24*60*60*10) : now + (days*24*60*60);
   return {
+    // Identity
     sub: installId,
     iss: 'asheo.api',
     aud: 'mozlince-client',
     installId,
+
+    // Plan
     plan: 'premium',
     planDisplayName: 'Premium',
     tier: 'premium',
@@ -180,11 +181,24 @@ function buildClaims(installId, lic) {
     active: true,
     isPremium: true,
     isVerified: true,
+
+    // 🔥 SOURCE — corrige o bug do buildFreeEntitlement
+    source: 'premium',
+    sourceType: 'server',
+    isFounder: true,
+
+    // Scope
     scope: PREMIUM_SCOPE,
+
+    // Features / Capabilities / Limits
     features: mapFeatures(true),
     capabilities: mapCapabilities(true),
     limits: { ...PREMIUM_LIMITS },
+
+    // Secret
     secret: 'segredo-' + installId,
+
+    // Timestamps
     iat: now,
     nbf: now - 5,
     exp: exp,
@@ -213,7 +227,7 @@ function generateLicenseKey() {
 }
 
 // ═══════════════════════════════════════════════
-// AUTH — valida Bearer JWT
+// AUTH — Bearer JWT
 // ═══════════════════════════════════════════════
 function validateBearer(req) {
   const auth = req.headers['authorization'] || '';
@@ -226,7 +240,7 @@ function validateBearer(req) {
 }
 
 // ═══════════════════════════════════════════════
-// GATEWAYS + RULES (o que a extensão espera)
+// GATEWAYS + RULES + CAMPAIGNS
 // ═══════════════════════════════════════════════
 const GATEWAYS = [
   { id: 'default-stripe', name: 'Stripe', pattern: 'https://js.stripe.com/*', enabled: true, isDefault: true },
@@ -262,7 +276,7 @@ async function tgAnswer(id, text='') {
 
 function menuPrincipal() {
   return {
-    texto: `╔══════════════════════════════════════╗\n║   👑 <b>MOZLINCE LICENSE PANEL</b> 👑   ║\n║      <i>Premium Edition v5.0</i>         ║\n╚══════════════════════════════════════╝\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✨ <b>Selecione:</b>`,
+    texto: `╔══════════════════════════════════════╗\n║   👑 <b>MOZLINCE LICENSE PANEL</b> 👑   ║\n║      <i>Premium Edition v5.1</i>         ║\n╚══════════════════════════════════════╝\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n✨ <b>Selecione:</b>`,
     teclado: { inline_keyboard: [
       [{ text:'🔑 GERAR LICENÇA', callback_data:'m_gerar' }],
       [{ text:'📋 LISTAR', callback_data:'m_listar' }, { text:'📊 STATS', callback_data:'m_stats' }],
@@ -456,7 +470,7 @@ async function handleMessage(msg) {
       await tgSend(chatId, `✅ Vinculada!\n\n🔑 <code>${chave}</code>\n🔗 <code>${installId}</code>`);
       return;
     }
-    if (cmd === '/desvincular') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠️ /desvincular &lt;chave&gt;`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `❌`); return; } l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); await tgSend(chatId, `🔓`); return; }
+    if (cmd === '/desvincular') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠️`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `❌`); return; } l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); await tgSend(chatId, `🔓`); return; }
     if (cmd === '/revogar') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠️`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `❌`); return; } l.ativa = false; await redisSet(k, JSON.stringify(l)); await tgSend(chatId, `❌`); return; }
     if (cmd === '/deletar') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠️`); return; } await redisDel(k); await tgSend(chatId, `🗑️`); return; }
     if (cmd === '/deletarativas') { const keys = await redisKeys('ASHEO-*'); let n = 0; for (const k of keys) { const l = await redisGet(k); if (l && l.ativa) { await redisDel(k); n++; } } await tgSend(chatId, `🗑️ ${n}`); return; }
@@ -466,9 +480,6 @@ async function handleMessage(msg) {
   } catch (e) { log('ERRO','Message: '+e.message); }
 }
 
-// ═══════════════════════════════════════════════
-// WEBHOOK TELEGRAM
-// ═══════════════════════════════════════════════
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
@@ -479,39 +490,35 @@ app.post('/telegram-webhook', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// 🔥 API COMPLETA — todas as rotas que a extensão precisa
+// API COMPLETA v5.1
 // ═══════════════════════════════════════════════════════════════
 
-// ─── ROOT ───
-app.get('/', (req, res) => {
-  res.json({ ok: true, service: 'mozlince-license-api', version: '5.0', status: 'live' });
-});
+app.get('/', (req, res) => res.json({ ok: true, service: 'mozlince-license-api', version: '5.1', status: 'live' }));
 
-// ─── /v1/health ───
-app.get('/v1/health', (req, res) => {
-  res.json({ ok: true, status: 'healthy', uptime: Math.floor(process.uptime()), version: '5.0', timestamp: new Date().toISOString() });
-});
+app.get('/v1/health', (req, res) => res.json({ ok: true, status: 'healthy', uptime: Math.floor(process.uptime()), version: '5.1', timestamp: new Date().toISOString() }));
 
-// ─── /v1/version ───
-app.get('/v1/version', (req, res) => {
-  res.json({ ok: true, version: '5.0', api: 'v1', minClientVersion: '1.0.0', timestamp: new Date().toISOString() });
-});
+app.get('/v1/version', (req, res) => res.json({ ok: true, version: '5.1', api: 'v1', minClientVersion: '1.0.0', timestamp: new Date().toISOString() }));
 
-// ─── /v1/status (mantido) ───
-app.get('/v1/status', (req, res) => {
-  res.json({ ok: true, service: 'mozlince-license-api', version: '5.0', hora: new Date().toISOString() });
-});
+app.get('/v1/status', (req, res) => res.json({ ok: true, service: 'mozlince-license-api', version: '5.1', hora: new Date().toISOString() }));
 
-// 🔥 /v1/bootstrap — CRÍTICO! Config inicial
+// /v1/bootstrap — COM SOURCE PREMIUM
 app.get('/v1/bootstrap', (req, res) => {
   const auth = validateBearer(req);
   log('BOOT', `Bootstrap de ${auth.ok ? auth.decoded.sub : '(sem auth)'}`);
   res.json({
     ok: true,
-    version: '5.0',
+    version: '5.1',
     apiVersion: 'v1',
     issuedAt: new Date().toISOString(),
     serverTime: Date.now(),
+
+    // 🔥 Fonte premium — corrige o buildFreeEntitlement
+    source: 'premium',
+    sourceType: 'server',
+    isFounder: true,
+    tier: 'premium',
+    kind: 'premium',
+
     config: {
       apiBase: 'https://mozlince.onrender.com',
       featuresEnabled: true,
@@ -550,92 +557,68 @@ app.get('/v1/bootstrap', (req, res) => {
   });
 });
 
-// 🔥 /v1/rules — Regras de bypass
 app.get('/v1/rules', (req, res) => {
   const auth = validateBearer(req);
   const isPremium = auth.ok && (auth.decoded.tier === 'premium' || auth.decoded.scope);
   log('API', `Rules pedidas (auth=${auth.ok}, premium=${isPremium})`);
   res.json({
-    ok: true,
-    version: 3,
-    updatedAt: new Date().toISOString(),
+    ok: true, version: 3, updatedAt: new Date().toISOString(),
+    source: 'premium', tier: 'premium',
     scope: isPremium ? PREMIUM_SCOPE : ['free'],
     rules: isPremium ? RULES : RULES.slice(0, 1),
     serverTime: Date.now()
   });
 });
 
-// 🔥 /v1/exclusive/manifest — Manifest exclusivo
 app.get('/v1/exclusive/manifest', (req, res) => {
   const auth = validateBearer(req);
   log('API', `Exclusive manifest (auth=${auth.ok})`);
   res.json({
     ok: true,
+    source: 'premium', tier: 'premium',
     manifest: {
-      version: '1.6.2',
-      version_name: '1.6.2',
-      generatedAt: new Date().toISOString(),
-      minVersion: '1.0.0',
+      version: '1.6.2', version_name: '1.6.2',
+      generatedAt: new Date().toISOString(), minVersion: '1.0.0',
       exclusiveFeatures: Object.keys(PREMIUM_FEATURES),
-      rules: RULES,
-      gateways: GATEWAYS,
+      rules: RULES, gateways: GATEWAYS,
       signature: crypto.randomBytes(64).toString('hex')
     },
-    cachedAt: Date.now(),
-    expiresAt: Date.now() + (23 * 3600 * 1000)
+    cachedAt: Date.now(), expiresAt: Date.now() + (23 * 3600 * 1000)
   });
 });
 
-// 🔥 /v1/exclusive/sync
 app.get('/v1/exclusive/sync', (req, res) => {
   const auth = validateBearer(req);
   log('API', `Exclusive sync (auth=${auth.ok})`);
   res.json({
-    ok: true,
-    manifest: {
-      version: '1.6.2',
-      generatedAt: new Date().toISOString(),
-      rules: RULES,
-      gateways: GATEWAYS,
-      signature: crypto.randomBytes(64).toString('hex')
-    },
+    ok: true, source: 'premium', tier: 'premium',
+    manifest: { version: '1.6.2', generatedAt: new Date().toISOString(), rules: RULES, gateways: GATEWAYS, signature: crypto.randomBytes(64).toString('hex') },
     cachedAt: Date.now()
   });
 });
 
-// 🔥 /v1/gateways — Registro de gateways
 app.get('/v1/gateways', (req, res) => {
   const auth = validateBearer(req);
   log('API', `Gateways (auth=${auth.ok})`);
-  res.json({
-    ok: true,
-    version: 1,
-    gateways: GATEWAYS,
-    serverTime: Date.now()
-  });
+  res.json({ ok: true, source: 'premium', tier: 'premium', version: 1, gateways: GATEWAYS, serverTime: Date.now() });
 });
 
-// 🔥 /v1/campaign
 app.get('/v1/campaign', (req, res) => {
   const auth = validateBearer(req);
   log('API', `Campaign (auth=${auth.ok})`);
-  res.json({
-    ok: true,
-    campaigns: CAMPAIGNS,
-    serverTime: Date.now()
-  });
+  res.json({ ok: true, source: 'premium', tier: 'premium', campaigns: CAMPAIGNS, serverTime: Date.now() });
 });
 
-// 🔥 /v1/dashboard
 app.get('/v1/dashboard', (req, res) => {
   const auth = validateBearer(req);
   log('API', `Dashboard (auth=${auth.ok})`);
   res.json({
     ok: true,
+    source: 'premium', sourceType: 'server', isFounder: true,
     dashboard: {
       tier: auth.ok && auth.decoded.tier === 'premium' ? 'premium' : 'free',
-      seat: auth.ok ? 1 : 0,
-      seats: auth.ok ? 1 : 0,
+      source: auth.ok && auth.decoded.tier === 'premium' ? 'premium' : 'free',
+      seat: auth.ok ? 1 : 0, seats: auth.ok ? 1 : 0,
       installId: auth.ok ? auth.decoded.sub : null,
       expiresAt: auth.ok ? auth.decoded.exp * 1000 : null,
       features: auth.ok ? mapFeatures(true) : mapFeatures(false),
@@ -647,67 +630,52 @@ app.get('/v1/dashboard', (req, res) => {
   });
 });
 
-// 🔥 /v1/premium/definitions
 app.get('/v1/premium/definitions', (req, res) => {
   res.json({
-    ok: true,
-    features: PREMIUM_FEATURES,
-    capabilities: PREMIUM_CAPABILITIES,
-    premiumLimits: PREMIUM_LIMITS,
-    freeLimits: FREE_LIMITS,
-    scope: PREMIUM_SCOPE,
-    version: '1.6.2'
+    ok: true, source: 'premium', tier: 'premium',
+    features: PREMIUM_FEATURES, capabilities: PREMIUM_CAPABILITIES,
+    premiumLimits: PREMIUM_LIMITS, freeLimits: FREE_LIMITS,
+    scope: PREMIUM_SCOPE, version: '1.6.2'
   });
 });
 
-// ─── /v1/planos ───
 app.get('/v1/planos', (req, res) => {
   res.json({ ok: true, planos: Object.entries(PACOTES).map(([id,p]) => ({ id, nome:p.nome, dias:p.dias, preco:p.preco, emoji:p.emoji })) });
 });
 
 // ═══════════════════════════════════════════════
-// /v1/activate — ATIVAÇÃO PRINCIPAL
+// /v1/activate — ATIVAÇÃO
 // ═══════════════════════════════════════════════
 app.post('/v1/activate', async (req, res) => {
   const inicio = Date.now();
   const { installId, licenseKey, clientTag } = req.body || {};
   log('INFO', `Activate: installId=${installId ? installId.substring(0,12)+'...' : '?'} | key=${licenseKey ? normalizeKey(licenseKey).substring(0,18)+'...' : '(vazia)'}`);
 
-  // ─── MODO 1: Feature activation (Bearer no header) ───
+  // MODO 1: Feature activation (Bearer)
   if (!licenseKey && !installId) {
     const auth = validateBearer(req);
-    if (!auth.ok) return res.status(401).json({ ok: false, error: 'missing_auth', message: 'Bearer JWT obrigatorio' });
+    if (!auth.ok) return res.status(401).json({ ok: false, error: 'missing_auth' });
     const feature = (req.body && req.body.feature) || req.query.feature;
     if (!feature) return res.status(400).json({ ok: false, error: 'missing_feature' });
+    if (!PREMIUM_FEATURES[feature]) return res.status(404).json({ ok: false, error: 'unknown_feature' });
 
-    if (!PREMIUM_FEATURES[feature]) return res.status(404).json({ ok: false, error: 'unknown_feature', message: `Feature '${feature}' nao existe` });
-
-    // Verifica se a feature está no scope
     const scope = auth.decoded.scope || [];
     const hasScope = Array.isArray(scope) ? scope.includes(feature) : String(scope).includes(feature);
-    if (!hasScope && auth.decoded.tier !== 'premium') return res.status(403).json({ ok: false, error: 'feature_not_in_scope', message: `Feature '${feature}' nao autorizada` });
+    if (!hasScope && auth.decoded.tier !== 'premium') return res.status(403).json({ ok: false, error: 'feature_not_in_scope' });
 
-    try {
-      const now = Math.floor(Date.now()/1000);
-      const token = jwt.sign({
-        sub: auth.decoded.sub,
-        installId: auth.decoded.sub,
-        feature,
-        kind: 'feature',
-        type: 'feature',
-        tier: 'premium',
-        scope: [feature, 'premium'],
-        iat: now, nbf: now - 5, exp: now + 300,
-        jti: crypto.randomUUID()
-      }, PRIVATE_KEY, { algorithm: 'ES256' });
-      log('FEAT', `✅ ${feature} | ${auth.decoded.sub} | ${Date.now()-inicio}ms`);
-      return res.json({ ok: true, token, feature, expires_in: 300, exp: now + 300 });
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: 'internal', message: e.message });
-    }
+    const now = Math.floor(Date.now()/1000);
+    const token = jwt.sign({
+      sub: auth.decoded.sub, installId: auth.decoded.sub, feature,
+      kind: 'feature', type: 'feature', tier: 'premium',
+      source: 'premium', isFounder: true,
+      scope: [feature, 'premium'],
+      iat: now, nbf: now - 5, exp: now + 300, jti: crypto.randomUUID()
+    }, PRIVATE_KEY, { algorithm: 'ES256' });
+    log('FEAT', `✅ ${feature} | ${auth.decoded.sub} | ${Date.now()-inicio}ms`);
+    return res.json({ ok: true, token, feature, expires_in: 300, exp: now + 300 });
   }
 
-  // ─── MODO 2: Ativação normal (licenseKey + installId) ───
+  // MODO 2: Ativação normal
   if (!installId || typeof installId !== 'string' || installId.length < 5) return res.status(400).json({ error: 'missing_installId' });
   if (!PRIVATE_KEY) return res.status(500).json({ error: 'server_misconfigured' });
   if (!licenseKey || typeof licenseKey !== 'string' || !licenseKey.toUpperCase().startsWith('ASHEO-')) return res.status(401).json({ error: 'missing_license' });
@@ -730,7 +698,9 @@ app.post('/v1/activate', async (req, res) => {
     const token = signToken(buildClaims(installId, lic));
     log('ATIV', `✅ ${installId.substring(0,12)}... | ${keyNorm.substring(0,18)}... | ${Date.now()-inicio}ms`);
     return res.json({
-      token, tier: 'premium', kind: 'premium',
+      token,
+      tier: 'premium', kind: 'premium',
+      source: 'premium', sourceType: 'server', isFounder: true,
       seat: 1, seats: 1, gwPass: null,
       plan: 'premium', planDisplayName: 'Premium',
       expires_in: lic.ilimitada ? -1 : Math.floor((lic.expiraEm - Date.now())/1000),
@@ -739,7 +709,6 @@ app.post('/v1/activate', async (req, res) => {
   } catch (e) { return res.status(500).json({ error: 'internal', message: e.message }); }
 });
 
-// ─── /v1/feature/activate (compatibilidade) ───
 app.post('/v1/feature/activate', async (req, res) => {
   req.body = req.body || {};
   return app._router.handle(Object.assign(req, { url: '/v1/activate', method: 'POST' }), res, () => {});
@@ -754,14 +723,13 @@ app.get('/v1/feature/activate', async (req, res) => {
   const token = jwt.sign({
     sub: auth.decoded.sub, installId: auth.decoded.sub, feature,
     kind: 'feature', type: 'feature', tier: 'premium',
+    source: 'premium', isFounder: true,
     scope: [feature, 'premium'],
-    iat: now, nbf: now - 5, exp: now + 300,
-    jti: crypto.randomUUID()
+    iat: now, nbf: now - 5, exp: now + 300, jti: crypto.randomUUID()
   }, PRIVATE_KEY, { algorithm: 'ES256' });
   res.json({ ok: true, token, feature, expires_in: 300, exp: now + 300 });
 });
 
-// ─── /v1/deactivate ───
 app.post('/v1/deactivate', async (req, res) => {
   const { installId, licenseKey } = req.body || {};
   if (licenseKey) {
@@ -774,7 +742,6 @@ app.post('/v1/deactivate', async (req, res) => {
   res.json({ ok: true, message: 'Desativado' });
 });
 
-// ─── /v1/verify ───
 app.post('/v1/verify', (req, res) => {
   const { token } = req.body || {};
   if (!token) return res.status(400).json({ ok: false, error: 'missing_token' });
@@ -784,7 +751,6 @@ app.post('/v1/verify', (req, res) => {
   } catch (e) { return res.status(401).json({ ok: false, valido: false, erro: e.message }); }
 });
 
-// ─── /verificar-licenca ───
 app.post('/verificar-licenca', (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ erro: 'Token obrigatorio' });
@@ -797,11 +763,12 @@ app.post('/verificar-licenca', (req, res) => {
 // ═══════════════════════════════════════════════
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  log('SYS', `🚀 Servidor Mozlince v5.0 na porta ${PORT}`);
+  log('SYS', `🚀 Servidor Mozlince v5.1 na porta ${PORT}`);
   log('SYS', `Chave: ${ORIGEM}`);
   log('SYS', `Redis: ${UPSTASH_URL ? 'OK' : 'FALTA'}`);
   log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA'}`);
   log('SYS', `Features: ${Object.keys(PREMIUM_FEATURES).length} | Scope: ${PREMIUM_SCOPE.length} itens`);
+  log('SYS', `source: 'premium' integrado no JWT, bootstrap e responses`);
   log('SYS', `Rotas: /v1/bootstrap /v1/rules /v1/exclusive/manifest /v1/exclusive/sync`);
   log('SYS', `       /v1/gateways /v1/campaign /v1/dashboard /v1/health /v1/version`);
   log('SYS', `       /v1/activate /v1/feature/activate /v1/deactivate /v1/verify`);
