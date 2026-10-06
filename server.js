@@ -1,9 +1,3 @@
-/* ═══════════════════════════════════════════════════════════════
-   ✦ MOZLINCE NEBULA  ·  v8.3 AURORA++
-   © Asheo Systems · Premium License Engine
-   ───────────────────────────────────────────────────────────────
-   ◈ v8.3 — encPack AES-GCM + k + _prov ES256 no /v1/bootstrap
-   ═══════════════════════════════════════════════════════════════ */
 require('dotenv').config();
 const express = require('express');
 const jwt = require('jsonwebtoken');
@@ -11,14 +5,14 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const app = express();
-const ALLOWED_HEADERS = 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Install-Id, X-Client-Tag, X-License-Key, X-Request-Id, Accept-Language';
+const ALLOWED_HEADERS = 'Origin, X-Requested-With, Content-Type, Accept, Authorization, X-Install-Id, X-Client-Tag, X-License-Key, X-Request-Id, Accept-Language, X-Asheo-Target, X-Asheo-Method, X-Asheo-Install, X-Asheo-Ts, X-Asheo-Sig, X-Asheo-Build, X-Asheo-Nonce, X-Asheo-Origin, X-Asheo-Auth, X-Asheo-Bin, X-Asheo-Card, X-Asheo-Clientkey, X-Asheo-Special-Hosts, X-Asheo-Headers, X-Asheo-Swap-Only, X-Asheo-3ds-Strip, X-Asheo-Remove-Cvv, X-Asheo-Bt-Host, X-Asheo-Pack-Fmt';
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS);
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Request-Id');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Request-Id, X-Asheo-Proxied, X-Asheo-Swapped, X-Asheo-Swap-Ok');
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.3');
+  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.3.1');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -29,7 +23,7 @@ const TAGS = { INFO:C.cyanB, OK:C.green, WARN:C.amber, ERRO:C.red, SYS:C.violetB
 function log(t, m) { const ts = new Date().toISOString().replace('T',' ').substring(0,19); const tag = (TAGS[t]||C.gray) + C.b + '▸ ' + t.padEnd(7) + C.r; console.log(`${C.dim}${ts}${C.r} ${tag} ${m}`); }
 function banner() {
   console.log(`\n${C.violet}   ╭──────────────────────────────────────────────╮${C.r}`);
-  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.3${C.r}  ${C.dim}AURORA++${C.r}  ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.3.1${C.r} ${C.dim}AURORA++${C.r}${C.violet}│${C.r}`);
   console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · Asheo Systems${C.r}     ${C.violet}│${C.r}`);
   console.log(`${C.violet}   ╰──────────────────────────────────────────────╯${C.r}\n`);
 }
@@ -105,7 +99,59 @@ const GATEWAYS_META = [
   {id:'default-adyen',name:'Adyen',pattern:'https://*.adyen.com/*',enabled:true,isDefault:true},
   {id:'default-braintree',name:'Braintree',pattern:'https://*.braintreegateway.com/*',enabled:true,isDefault:true}
 ];
-const CAMPAIGNS = [{id:'default-1',name:'Default Campaign',enabled:true,createdAt:new Date().toISOString()}];
+const CAMPAIGNS = [];
+
+const FEATURE_KEYS = ['browserMods','ruleOpsLab','liveHud','advancedProtection','apiAccess','experimentalFeatures'];
+const CAPABILITY_KEYS = ['customEncryptedGateways','binGenerator'];
+const LIMIT_KEYS = ['binPool','ccQueue','ruleLimit','profileLimit','randomRouting'];
+
+const PREMIUM_FEATURES = { browser_mods:{enabled:true,label:'Browser Mods'}, rule_ops_lab:{enabled:true,label:'Rule Ops Lab'}, live_injection_hud:{enabled:true,label:'Live Injection HUD'}, algo_v2:{enabled:true,label:'Algo V2'}, exclusive_rules:{enabled:true,label:'Exclusive Rules'}, advanced_automation:{enabled:true,label:'Advanced Automation'}, multi_account:{enabled:true,label:'Multi Account'}, custom_export:{enabled:true,label:'Custom Export'}, api_access:{enabled:true,label:'API Access'} };
+const PREMIUM_CAPABILITIES = { priority_support:{enabled:true,label:'Priority Support'}, custom_webhooks:{enabled:true,label:'Custom Webhooks'}, cloud_sync:{enabled:true,label:'Cloud Sync'}, bulk_actions:{enabled:true,label:'Bulk Actions'}, advanced_analytics:{enabled:true,label:'Advanced Analytics'} };
+const PREMIUM_LIMITS = { max_accounts:-1, daily_actions:-1, max_templates:-1, history_days:-1, export_limit:-1 };
+const FREE_LIMITS = { max_accounts:1, daily_actions:20, max_templates:3, history_days:3, export_limit:5 };
+const PREMIUM_SCOPE = ['bypasser','cardfiller','cvv','premium','browserMods','persona','rules','gateways','exclusive'];
+const mapFeatures = on => Object.fromEntries(Object.entries(PREMIUM_FEATURES).map(([k,v])=>[k,on?v.enabled:false]));
+const mapCapabilities = on => Object.fromEntries(Object.entries(PREMIUM_CAPABILITIES).map(([k,v])=>[k,on?v.enabled:false]));
+
+function buildEntitlement(lic, installId) {
+  const isPremium = lic && lic.ativa && (lic.lifetime || lic.expiraEm > Date.now());
+  const plano = lic ? lic.plano : 'free';
+  const isTrial = plano === '3d' || (lic && lic.trial);
+  const expiresAt = lic ? lic.expiraEm : null;
+  const features = {};
+  FEATURE_KEYS.forEach(k => { features[k] = isPremium ? true : false; });
+  const capabilities = {};
+  CAPABILITY_KEYS.forEach(k => { capabilities[k] = isPremium ? true : false; });
+  const limits = {};
+  LIMIT_KEYS.forEach(k => {
+    if (k === 'binPool' || k === 'ccQueue' || k === 'ruleLimit' || k === 'profileLimit') limits[k] = isPremium ? null : (k === 'ccQueue' ? 10 : 2);
+    else if (k === 'randomRouting') limits[k] = isPremium ? true : false;
+  });
+  return {
+    tier: isPremium ? 'premium' : 'free',
+    plan: isPremium ? (isTrial ? 'trial' : 'premium') : 'free',
+    planDisplayName: isPremium ? (isTrial ? 'Premium Trial' : 'Premium') : 'Free',
+    licenseType: isPremium ? (isTrial ? 'trial' : 'premium') : 'free',
+    status: isPremium ? 'active' : 'inactive',
+    source: lic ? 'license' : 'free',
+    isFounder: false,
+    activatedAt: lic ? lic.ativadaEm || lic.criadaEm : null,
+    expiresAt: expiresAt,
+    nextBillingDate: expiresAt,
+    seatsAllowed: isPremium ? (lic.seatsAllowed || 999999) : 1,
+    seatsUsed: lic ? (lic.seatsUsed || 1) : 0,
+    activationCount: lic ? (lic.activationCount || 1) : 0,
+    maxActivations: null,
+    currentDeviceId: lic && lic.installId ? lic.installId : null,
+    deviceLocked: lic && lic.installId ? true : false,
+    canTransfer: false,
+    features, featureKeys: FEATURE_KEYS,
+    customFeatures: {},
+    capabilities, capabilityKeys: CAPABILITY_KEYS,
+    limits, limitKeys: LIMIT_KEYS,
+    metadata: lic ? { trial: isTrial, trialHours: isTrial ? 36 : null } : {}
+  };
+}
 
 function encryptPack(data, keyBase64) {
   const key = Buffer.from(keyBase64, 'base64');
@@ -130,13 +176,11 @@ function generateProv(installId) {
   } catch (e) { log('ERRO', 'generateProv: ' + e.message); return null; }
 }
 
-const PREMIUM_FEATURES = { browser_mods:{enabled:true,label:'Browser Mods',description:'Spoof fingerprint and rotate user-agent.'}, rule_ops_lab:{enabled:true,label:'Rule Ops Lab',description:'Bulk rule ops, presets, conflict scan.'}, live_injection_hud:{enabled:true,label:'Live Injection HUD',description:'On-page overlay showing each card swap.'}, algo_v2:{enabled:true,label:'Algo V2'}, exclusive_rules:{enabled:true,label:'Exclusive Rules'}, advanced_automation:{enabled:true,label:'Advanced Automation'}, multi_account:{enabled:true,label:'Multi Account'}, custom_export:{enabled:true,label:'Custom Export'}, api_access:{enabled:true,label:'API Access'} };
-const PREMIUM_CAPABILITIES = { priority_support:{enabled:true,label:'Priority Support'}, custom_webhooks:{enabled:true,label:'Custom Webhooks'}, cloud_sync:{enabled:true,label:'Cloud Sync'}, bulk_actions:{enabled:true,label:'Bulk Actions'}, advanced_analytics:{enabled:true,label:'Advanced Analytics'} };
-const PREMIUM_LIMITS = { max_accounts:-1, daily_actions:-1, max_templates:-1, history_days:-1, export_limit:-1 };
-const FREE_LIMITS = { max_accounts:1, daily_actions:20, max_templates:3, history_days:3, export_limit:5 };
-const PREMIUM_SCOPE = ['bypasser','cardfiller','cvv','premium','browserMods','persona','rules','gateways','exclusive'];
-const mapFeatures = on => Object.fromEntries(Object.entries(PREMIUM_FEATURES).map(([k,v])=>[k,on?v.enabled:false]));
-const mapCapabilities = on => Object.fromEntries(Object.entries(PREMIUM_CAPABILITIES).map(([k,v])=>[k,on?v.enabled:false]));
+function buildGwPass(installId) {
+  if (!PRIVATE_KEY) return null;
+  const now = Math.floor(Date.now() / 1000);
+  return jwt.sign({ sub: installId, purpose: 'gw-pass', iat: now, exp: now + 3600, jti: crypto.randomUUID() }, PRIVATE_KEY, { algorithm: 'ES256' });
+}
 
 function normalizeKey(k){ if(!k||typeof k!=='string')return ''; return k.trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9\-]/g,''); }
 async function redisSet(key, value) { const k = encodeURIComponent(normalizeKey(key)); const r = await fetch(`${UPSTASH_URL}/set/${k}`, { method:'POST', headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}`, 'Content-Type':'text/plain' }, body: typeof value === 'string' ? value : JSON.stringify(value) }); return r.json(); }
@@ -171,7 +215,8 @@ function buildClaims(installId, lic) {
   const now = Math.floor(Date.now()/1000);
   const isLife = lic && lic.plano === 'life';
   const exp = isLife ? now + (100 * 365 * 24 * 60 * 60) : Math.floor((lic.expiraEm || (lic.criadaEm + lic.dias*86400000)) / 1000);
-  return { sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId, plan:'premium', planDisplayName:'Premium', tier:'premium', kind:'premium', status:'active', active:true, isPremium:true, isVerified:true, source:'premium', sourceType:'server', isFounder:true, lifetime: isLife, plano: lic.plano, licenseKey: lic.chave, issuedAt: lic.criadaEm, expiresAt: lic.expiraEm, scope: PREMIUM_SCOPE, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, secret:'segredo-'+installId, iat: now, nbf: now-5, exp, jti: crypto.randomUUID() };
+  const ent = buildEntitlement(lic, installId);
+  return { sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId, plan: ent.plan, planDisplayName: ent.planDisplayName, tier: ent.tier, kind: 'premium', status: ent.status, active: ent.status === 'active', isPremium: ent.tier === 'premium', isVerified: true, source: 'premium', sourceType: 'server', isFounder: false, lifetime: isLife, plano: lic.plano, licenseKey: lic.chave, issuedAt: lic.criadaEm, expiresAt: lic.expiraEm, scope: PREMIUM_SCOPE, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, secret: crypto.createHash('sha256').update(installId + (lic.chave || '')).digest('hex'), iat: now, nbf: now-5, exp, jti: crypto.randomUUID() };
 }
 function signToken(claims){ if(!PRIVATE_KEY)throw new Error('Chave privada nao inicializada'); return jwt.sign(claims, PRIVATE_KEY, { algorithm:'ES256' }); }
 function formatDate(ts){ if(!ts)return 'Nunca'; return new Date(ts).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
@@ -193,7 +238,7 @@ async function tgAnswer(id, text='') { try { await fetch(`${TG_API}/answerCallba
 
 function menuPrincipal(lang='pt') {
   const hora = new Date().toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' });
-  return { texto: `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'menu_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◔</b> ${hora}   <b>◉</b> ${t(lang,'online')}   <b>⟡</b> ${t(lang,'secure')} ES256\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<i>${t(lang,'menu_sub')}</i>`, teclado: { inline_keyboard: [ [{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }], [{ text: t(lang,'btn_mykeys'), callback_data:'m_listar' }, { text: t(lang,'btn_stats'), callback_data:'m_stats' }], [{ text: t(lang,'btn_link'), callback_data:'m_vincular' }, { text: t(lang,'btn_unlink'), callback_data:'m_desvincular' }], [{ text: t(lang,'btn_query'), callback_data:'m_consultar' }], [{ text: t(lang,'btn_prices'), callback_data:'m_precos' }], [{ text: t(lang,'btn_support'), callback_data:'m_contacto' }], [{ text: t(lang,'btn_lang'), callback_data:'m_lang' }], [{ text: t(lang,'btn_help'), callback_data:'m_ajuda' }, { text: t(lang,'btn_danger'), callback_data:'m_perigo' }] ] } };
+  return { texto: `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'menu_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◔</b> ${hora}   <b>◉</b> ${t(lang,'online')}   <b>⟡</b> ${t(lang,'secure')} ES256\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<i>${t(lang,'menu_sub')}</i>`, teclado: { inline_keyboard: [ [{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }], [{ text: t(lang,'btn_mykeys'), callback_data:'m_listar' }, { text: t(lang,'btn_stats'), callback_data:'m_stats' }], [{ text: t(lang,'btn_link'), callback_data:'m_vincular' }, { text: t(lang,'btn_unlink'), callback_data:'m_desvincular' }], [{ text: t(lang,'btn_query'), callback_data:'m_consultar' }], [{ text: t(lang,'btn_prices'), callback_data:'m_precos' }], [{ text: t(lang,'btn_support'), callback_data:'m_contacto' }], [{ text: t(lang,'btn_lang'), callback_data:'m_lang' }], [{ text: t(lang,'btn_help'), callback_data:'m_ajuda' }, { text: t(lang,'btn_danger'), callback_data:'m_perigo' }] ] } };
 }
 async function cmdStart(chatId, msgId=null) { const lang = USER_LANG.get(String(chatId)) || 'pt'; const m = menuPrincipal(lang); if (msgId) await tgEdit(chatId, msgId, m.texto, m.teclado); else await tgSend(chatId, m.texto, m.teclado); }
 
@@ -201,34 +246,34 @@ async function handleCallback(cb) {
   const chatId = cb.message.chat.id, msgId = cb.message.message_id, data = cb.data, userId = String(cb.from.id);
   const isOwner = userId === String(OWNER_ID);
   const lang = USER_LANG.get(String(chatId)) || 'pt';
-  if (data === 'm_lang') { await tgAnswer(cb.id); const texto = `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>◐  ${t(lang,'lang_select')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`; const kb = { inline_keyboard: [ [{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }], [{ text: t(lang,'btn_back'), callback_data:'m_home' }] ]}; await tgEdit(chatId, msgId, texto, kb); return; }
+  if (data === 'm_lang') { await tgAnswer(cb.id); const texto = `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>◐  ${t(lang,'lang_select')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`; const kb = { inline_keyboard: [ [{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }], [{ text: t(lang,'btn_back'), callback_data:'m_home' }] ]}; await tgEdit(chatId, msgId, texto, kb); return; }
   if (data === 'lang_pt' || data === 'lang_en') { const novo = data === 'lang_pt' ? 'pt' : 'en'; USER_LANG.set(String(chatId), novo); await tgAnswer(cb.id, t(novo,'lang_saved')); const m = menuPrincipal(novo); await tgEdit(chatId, msgId, m.texto, m.teclado); return; }
   if (!isOwner) {
-    if (data === 'm_contacto') { SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() }); await tgAnswer(cb.id, '✎'); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'support_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>✎</b> ${t(lang,'support_write')}\n<i>${t(lang,'support_hint')}</i>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◔</b> ${t(lang,'support_exp')}`, { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] }); return; }
+    if (data === 'm_contacto') { SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() }); await tgAnswer(cb.id, '✎'); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'support_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>✎</b> ${t(lang,'support_write')}\n<i>${t(lang,'support_hint')}</i>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◔</b> ${t(lang,'support_exp')}`, { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] }); return; }
     if (data === 'm_cancelar_suporte') { SUPPORT_SESSIONS.delete(String(chatId)); await tgAnswer(cb.id, '✕'); await tgEdit(chatId, msgId, `<b>${t(lang,'support_cancelled')}</b>\n\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }]] }); return; }
-    if (data === 'm_home') { await tgAnswer(cb.id); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>◈  ${t(lang,'welcome_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]] }); return; }
+    if (data === 'm_home') { await tgAnswer(cb.id); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>◈  ${t(lang,'welcome_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]] }); return; }
     await tgAnswer(cb.id, '⛔'); return;
   }
   try {
     if (data === 'm_home') { await tgAnswer(cb.id); return cmdStart(chatId, msgId); }
-    if (data === 'm_gerar') { await tgAnswer(cb.id, '⚡'); const kb = { inline_keyboard: [] }; const entries = Object.entries(PACOTES); for (let i = 0; i < entries.length; i += 2) { const linha = [{ text: `${entries[i][1].emoji} ${entries[i][1].nome} · ${precoFmt(entries[i][1].preco)}`, callback_data:`g_${entries[i][0]}` }]; if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` }); kb.inline_keyboard.push(linha); } kb.inline_keyboard.push([{ text: t(lang,'btn_back'), callback_data:'m_home' }]); let tabela = ''; for (const [,p] of Object.entries(PACOTES)) { const dur = p.lifetime ? '∞' : `${p.dias}d`; tabela += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>  <i>${dur}</i>\n`; } await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'gen_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${t(lang,'gen_sub')}</i>\n\n${tabela}\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`, kb); return; }
-    if (data.startsWith('g_')) { const pk = data.substring(2), p = PACOTES[pk]; if (!p) { await tgAnswer(cb.id, '✕'); return; } const chave = generateLicenseKey(); const agora = Date.now(); const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000); await redisSet(chave, JSON.stringify({ chave, plano: pk, planoNome: p.nome, preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco), dias: p.dias, lifetime: p.lifetime === true, ilimitada: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, installId: null, ativadaEm: null, v: 8 })); log('OK', `Chave ${pk} gerada: ${chave}`); await tgAnswer(cb.id, '✓'); const restaTxt = p.lifetime ? '∞  LIFETIME' : humanTime(p.dias*24*60*60*1000); const barra = p.lifetime ? '▰▰▰▰▰▰▰▰▰▰' : progressBar(100); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'gen_success')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>⌬  ${t(lang,'gen_key')}</b>\n<code>${chave}</code>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>${p.emoji}</b>  <b>${t(lang,'gen_plan')}:</b>  <b>${p.nome}</b>\n<b>◆</b>  <b>${t(lang,'gen_price')}:</b>  <code>${precoFmt(p.preco)}</code>\n<b>◔</b>  <b>${t(lang,'gen_issued')}:</b>  ${formatDate(agora)}\n<b>◕</b>  <b>${t(lang,'gen_expires')}:</b>  ${p.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(expira)}\n<b>⟡</b>  <b>${t(lang,'gen_duration')}:</b>  <b>${restaTxt}</b>\n<b>∞</b>  <b>${t(lang,'gen_lifetime')}:</b>  ${p.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`}\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>${barra}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_query'), callback_data:`c_${chave}` }],[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); return; }
-    if (data === 'm_listar') { await tgAnswer(cb.id, '◈'); const keys = await redisKeys('ASHEO-*'); if (keys.length === 0) { await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'list_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${t(lang,'list_empty')}</i>`, { inline_keyboard: [[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; } let txt = `<b>${t(lang,'list_title')}</b>  <code>(${keys.length})</code>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n`; const inlineKb = []; for (let i = 0; i < Math.min(keys.length, 15); i++) { const l = await redisGet(keys[i]); if (!l) continue; const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now()); const emoji = l.lifetime ? '∞' : (l.ativa ? '●' : '○'); txt += `<b>${emoji}</b> ${l.installId?'⟡':'○'} <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n\n`; inlineKb.push([{ text:`▸ ${keys[i].substring(0,18)}…`, callback_data:`c_${keys[i]}` }]); } if (keys.length > 15) txt += `<i>${t(lang,'list_more',{n:keys.length-15})}</i>\n`; inlineKb.push([{ text: t(lang,'btn_refresh'), callback_data:'m_listar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]); await tgEdit(chatId, msgId, txt, { inline_keyboard: inlineKb }); return; }
-    if (data === 'm_stats') { await tgAnswer(cb.id, '◧'); const keys = await redisKeys('ASHEO-*'); let ativas=0, expiradas=0, vinc=0, life=0, receita=0; for (const k of keys) { const l = await redisGet(k); if (!l) continue; if (l.ativa) ativas++; if (!l.lifetime && l.expiraEm < Date.now()) expiradas++; if (l.installId) vinc++; if (l.lifetime) life++; if (l.preco) receita += Number(l.preco) || 0; } const taxa = keys.length ? Math.round((ativas/keys.length)*100) : 0; await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'stats_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>◈</b>  <b>${t(lang,'stats_total')}:</b>  <code>${keys.length}</code>\n<b>●</b>  <b>${t(lang,'stats_active')}:</b>  <code>${ativas}</code>\n<b>○</b>  <b>${t(lang,'stats_expired')}:</b>  <code>${expiradas}</code>\n<b>⟡</b>  <b>${t(lang,'stats_linked')}:</b>  <code>${vinc}</code>\n<b>∞</b>  <b>${t(lang,'stats_lifetime')}:</b>  <code>${life}</code>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◆</b>  <b>${t(lang,'stats_revenue')}:</b>  <code>${precoFmt(receita)}</code>\n<b>◔</b>  <b>${t(lang,'stats_rate')}:</b>  <b>${taxa}%</b>\n<code>${progressBar(taxa, 15)}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_refresh'), callback_data:'m_stats' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
-    if (data === 'm_vincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'act_link')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>/activate &lt;installId&gt; &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
-    if (data === 'm_desvincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'act_unlink')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>/desvincular &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
-    if (data === 'm_consultar') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'btn_query')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>/status &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
-    if (data === 'm_precos') { await tgAnswer(cb.id); let txt = `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'prices_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n`; for (const [,p] of Object.entries(PACOTES)) { const dur = p.lifetime ? '∞' : `${p.dias} dias`; txt += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>\n      <i>${dur}</i>\n`; } txt += `\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>◆ ${t(lang,'prices_currency')}</i>`; await tgEdit(chatId, msgId, txt, { inline_keyboard: [[{ text: t(lang,'btn_support'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
-    if (data === 'm_contacto') { await tgAnswer(cb.id, '✆'); SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() }); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'support_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>✎</b> ${t(lang,'support_write')}\n<i>${t(lang,'support_hint')}</i>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◔</b> ${t(lang,'support_exp')}`, { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] }); return; }
+    if (data === 'm_gerar') { await tgAnswer(cb.id, '⚡'); const kb = { inline_keyboard: [] }; const entries = Object.entries(PACOTES); for (let i = 0; i < entries.length; i += 2) { const linha = [{ text: `${entries[i][1].emoji} ${entries[i][1].nome} · ${precoFmt(entries[i][1].preco)}`, callback_data:`g_${entries[i][0]}` }]; if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` }); kb.inline_keyboard.push(linha); } kb.inline_keyboard.push([{ text: t(lang,'btn_back'), callback_data:'m_home' }]); let tabela = ''; for (const [,p] of Object.entries(PACOTES)) { const dur = p.lifetime ? '∞' : `${p.dias}d`; tabela += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>  <i>${dur}</i>\n`; } await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'gen_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${t(lang,'gen_sub')}</i>\n\n${tabela}\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`, kb); return; }
+    if (data.startsWith('g_')) { const pk = data.substring(2), p = PACOTES[pk]; if (!p) { await tgAnswer(cb.id, '✕'); return; } const chave = generateLicenseKey(); const agora = Date.now(); const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000); await redisSet(chave, JSON.stringify({ chave, plano: pk, planoNome: p.nome, preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco), dias: p.dias, lifetime: p.lifetime === true, ilimitada: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, installId: null, ativadaEm: null, v: 8 })); log('OK', `Chave ${pk} gerada: ${chave}`); await tgAnswer(cb.id, '✓'); const restaTxt = p.lifetime ? '∞  LIFETIME' : humanTime(p.dias*24*60*60*1000); const barra = p.lifetime ? '▰▰▰▰▰▰▰▰▰▰' : progressBar(100); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'gen_success')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>⌬  ${t(lang,'gen_key')}</b>\n<code>${chave}</code>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>${p.emoji}</b>  <b>${t(lang,'gen_plan')}:</b>  <b>${p.nome}</b>\n<b>◆</b>  <b>${t(lang,'gen_price')}:</b>  <code>${precoFmt(p.preco)}</code>\n<b>◔</b>  <b>${t(lang,'gen_issued')}:</b>  ${formatDate(agora)}\n<b>◕</b>  <b>${t(lang,'gen_expires')}:</b>  ${p.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(expira)}\n<b>⟡</b>  <b>${t(lang,'gen_duration')}:</b>  <b>${restaTxt}</b>\n<b>∞</b>  <b>${t(lang,'gen_lifetime')}:</b>  ${p.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`}\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>${barra}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_query'), callback_data:`c_${chave}` }],[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); return; }
+    if (data === 'm_listar') { await tgAnswer(cb.id, '◈'); const keys = await redisKeys('ASHEO-*'); if (keys.length === 0) { await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'list_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${t(lang,'list_empty')}</i>`, { inline_keyboard: [[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; } let txt = `<b>${t(lang,'list_title')}</b>  <code>(${keys.length})</code>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n`; const inlineKb = []; for (let i = 0; i < Math.min(keys.length, 15); i++) { const l = await redisGet(keys[i]); if (!l) continue; const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now()); const emoji = l.lifetime ? '∞' : (l.ativa ? '●' : '○'); txt += `<b>${emoji}</b> ${l.installId?'⟡':'○'} <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n\n`; inlineKb.push([{ text:`▸ ${keys[i].substring(0,18)}…`, callback_data:`c_${keys[i]}` }]); } if (keys.length > 15) txt += `<i>${t(lang,'list_more',{n:keys.length-15})}</i>\n`; inlineKb.push([{ text: t(lang,'btn_refresh'), callback_data:'m_listar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]); await tgEdit(chatId, msgId, txt, { inline_keyboard: inlineKb }); return; }
+    if (data === 'm_stats') { await tgAnswer(cb.id, '◧'); const keys = await redisKeys('ASHEO-*'); let ativas=0, expiradas=0, vinc=0, life=0, receita=0; for (const k of keys) { const l = await redisGet(k); if (!l) continue; if (l.ativa) ativas++; if (!l.lifetime && l.expiraEm < Date.now()) expiradas++; if (l.installId) vinc++; if (l.lifetime) life++; if (l.preco) receita += Number(l.preco) || 0; } const taxa = keys.length ? Math.round((ativas/keys.length)*100) : 0; await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'stats_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>◈</b>  <b>${t(lang,'stats_total')}:</b>  <code>${keys.length}</code>\n<b>●</b>  <b>${t(lang,'stats_active')}:</b>  <code>${ativas}</code>\n<b>○</b>  <b>${t(lang,'stats_expired')}:</b>  <code>${expiradas}</code>\n<b>⟡</b>  <b>${t(lang,'stats_linked')}:</b>  <code>${vinc}</code>\n<b>∞</b>  <b>${t(lang,'stats_lifetime')}:</b>  <code>${life}</code>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◆</b>  <b>${t(lang,'stats_revenue')}:</b>  <code>${precoFmt(receita)}</code>\n<b>◔</b>  <b>${t(lang,'stats_rate')}:</b>  <b>${taxa}%</b>\n<code>${progressBar(taxa, 15)}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_refresh'), callback_data:'m_stats' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
+    if (data === 'm_vincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'act_link')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>/activate &lt;installId&gt; &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
+    if (data === 'm_desvincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'act_unlink')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>/desvincular &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
+    if (data === 'm_consultar') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLince NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'btn_query')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>/status &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
+    if (data === 'm_precos') { await tgAnswer(cb.id); let txt = `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'prices_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n`; for (const [,p] of Object.entries(PACOTES)) { const dur = p.lifetime ? '∞' : `${p.dias} dias`; txt += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>\n      <i>${dur}</i>\n`; } txt += `\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>◆ ${t(lang,'prices_currency')}</i>`; await tgEdit(chatId, msgId, txt, { inline_keyboard: [[{ text: t(lang,'btn_support'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
+    if (data === 'm_contacto') { await tgAnswer(cb.id, '✆'); SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() }); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'support_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<b>✎</b> ${t(lang,'support_write')}\n<i>${t(lang,'support_hint')}</i>\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◔</b> ${t(lang,'support_exp')}`, { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] }); return; }
     if (data === 'm_cancelar_suporte') { SUPPORT_SESSIONS.delete(String(chatId)); await tgAnswer(cb.id, '✕'); return cmdStart(chatId, msgId); }
-    if (data === 'm_ajuda') { await tgAnswer(cb.id); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'help_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>${t(lang,'help_cmds')}:</b>\n\n<code>/start</code>           Menu\n<code>/gerar</code>           Gerar\n<code>/listar</code>          Listar\n<code>/stats</code>           Estatísticas\n<code>/status &lt;k&gt;</code>      Consultar\n<code>/activate &lt;i&gt; &lt;k&gt;</code>  Vincular\n<code>/desvincular &lt;k&gt;</code> Desvincular\n<code>/revogar &lt;k&gt;</code>    Revogar\n<code>/deletar &lt;k&gt;</code>    Deletar uma\n<code>/deletartudo</code>     Deletar TUDO\n<code>/resp &lt;id&gt; &lt;msg&gt;</code> Responder\n<code>/lang</code>            Idioma\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
-    if (data === 'm_perigo') { await tgAnswer(cb.id, '⚠'); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'danger_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>⚠  ${t(lang,'danger_warn')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`, { inline_keyboard: [[{ text: t(lang,'danger_del_active'), callback_data:'danger_ativas' }],[{ text: t(lang,'danger_del_all'), callback_data:'danger_tudo' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
-    if (data === 'danger_ativas') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>⚠  CONFIRMAR</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n${t(lang,'danger_confirm_active')}`, { inline_keyboard: [[{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_ativas' }],[{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]] }); }
-    if (data === 'danger_tudo') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>💣  CONFIRMAR</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n${t(lang,'danger_confirm_all')}`, { inline_keyboard: [[{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_tudo' }],[{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]] }); }
+    if (data === 'm_ajuda') { await tgAnswer(cb.id); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'help_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>${t(lang,'help_cmds')}:</b>\n\n<code>/start</code>           Menu\n<code>/gerar</code>           Gerar\n<code>/listar</code>          Listar\n<code>/stats</code>           Estatísticas\n<code>/status &lt;k&gt;</code>      Consultar\n<code>/activate &lt;i&gt; &lt;k&gt;</code>  Vincular\n<code>/desvincular &lt;k&gt;</code> Desvincular\n<code>/revogar &lt;k&gt;</code>    Revogar\n<code>/deletar &lt;k&gt;</code>    Deletar uma\n<code>/deletartudo</code>     Deletar TUDO\n<code>/resp &lt;id&gt; &lt;msg&gt;</code> Responder\n<code>/lang</code>            Idioma\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
+    if (data === 'm_perigo') { await tgAnswer(cb.id, '⚠'); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'danger_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>⚠  ${t(lang,'danger_warn')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>`, { inline_keyboard: [[{ text: t(lang,'danger_del_active'), callback_data:'danger_ativas' }],[{ text: t(lang,'danger_del_all'), callback_data:'danger_tudo' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
+    if (data === 'danger_ativas') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>⚠  CONFIRMAR</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n${t(lang,'danger_confirm_active')}`, { inline_keyboard: [[{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_ativas' }],[{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]] }); }
+    if (data === 'danger_tudo') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>💣  CONFIRMAR</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n${t(lang,'danger_confirm_all')}`, { inline_keyboard: [[{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_tudo' }],[{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]] }); }
     if (data === 'confirm_ativas') { await tgAnswer(cb.id, '…'); const keys = await redisKeys('ASHEO-*'); let n = 0; for (const k of keys) { const l = await redisGet(k); if (l && l.ativa) { await redisDel(k); n++; } } return tgEdit(chatId, msgId, `✓  <b>${t(lang,'danger_done',{n})}</b>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); }
     if (data === 'confirm_tudo') { await tgAnswer(cb.id, '💣'); const keys = await redisKeys('ASHEO-*'); for (const k of keys) await redisDel(k); return tgEdit(chatId, msgId, `💣  <b>${t(lang,'danger_done',{n:keys.length})}</b>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); }
-    if (data.startsWith('c_')) { const k = data.substring(2), l = await redisGet(k); if (!l) { await tgAnswer(cb.id, '✕'); return; } await tgAnswer(cb.id); const resta = l.lifetime ? '∞  Lifetime' : humanTime((l.expiraEm||0) - Date.now()); const pct = l.lifetime ? 100 : Math.max(0, Math.min(100, Math.round(((l.expiraEm-Date.now())/(l.dias*86400000))*100))); const pk = PACOTES[l.plano] || { emoji:'◆' }; const statusTxt = !l.ativa ? t(lang,'detail_revoked') : (Date.now() > l.expiraEm && !l.lifetime ? t(lang,'status_expired') : t(lang,'detail_active')); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'detail_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>⌬  ${t(lang,'detail_key')}</b>\n<code>${k}</code>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>${pk.emoji}</b>  <b>${t(lang,'gen_plan')}:</b>  <b>${l.planoNome}</b>\n<b>◆</b>  <b>${t(lang,'gen_price')}:</b>  <code>${precoFmt(l.preco)}</code>\n<b>◔</b>  <b>${t(lang,'gen_issued')}:</b>  ${formatDate(l.criadaEm)}\n<b>◕</b>  <b>${t(lang,'gen_expires')}:</b>  ${l.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(l.expiraEm)}\n<b>⟡</b>  <b>${t(lang,'detail_remaining')}:</b>  <b>${resta}</b>\n<b>∞</b>  <b>${t(lang,'gen_lifetime')}:</b>  ${l.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`}\n<b>◉</b>  <b>${t(lang,'detail_status')}:</b>  ${statusTxt}\n<b>⟡</b>  <b>${t(lang,'detail_install')}:</b>  ${l.installId?`<code>${l.installId.substring(0,16)}…</code>`:`<i>${t(lang,'detail_not_linked')}</i>`}\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>${progressBar(pct)}</code> ${pct}%`, { inline_keyboard: [[{ text: l.installId ? t(lang,'act_unlink') : t(lang,'act_link'), callback_data: l.installId?`dv_${k}`:`v_${k}` }],[{ text: t(lang,'act_revoke'), callback_data:`rv_${k}` }, { text: t(lang,'act_delete'), callback_data:`dl_${k}` }],[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); return; }
-    if (data.startsWith('v_')) { const k = data.substring(2); await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'act_link')}</b>\n<code>/activate &lt;installId&gt; ${k}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
+    if (data.startsWith('c_')) { const k = data.substring(2), l = await redisGet(k); if (!l) { await tgAnswer(cb.id, '✕'); return; } await tgAnswer(cb.id); const resta = l.lifetime ? '∞  Lifetime' : humanTime((l.expiraEm||0) - Date.now()); const pct = l.lifetime ? 100 : Math.max(0, Math.min(100, Math.round(((l.expiraEm-Date.now())/(l.dias*86400000))*100))); const pk = PACOTES[l.plano] || { emoji:'◆' }; const statusTxt = !l.ativa ? t(lang,'detail_revoked') : (Date.now() > l.expiraEm && !l.lifetime ? t(lang,'status_expired') : t(lang,'detail_active')); await tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'detail_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>⌬  ${t(lang,'detail_key')}</b>\n<code>${k}</code>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>${pk.emoji}</b>  <b>${t(lang,'gen_plan')}:</b>  <b>${l.planoNome}</b>\n<b>◆</b>  <b>${t(lang,'gen_price')}:</b>  <code>${precoFmt(l.preco)}</code>\n<b>◔</b>  <b>${t(lang,'gen_issued')}:</b>  ${formatDate(l.criadaEm)}\n<b>◕</b>  <b>${t(lang,'gen_expires')}:</b>  ${l.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(l.expiraEm)}\n<b>⟡</b>  <b>${t(lang,'detail_remaining')}:</b>  <b>${resta}</b>\n<b>∞</b>  <b>${t(lang,'gen_lifetime')}:</b>  ${l.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`}\n<b>◉</b>  <b>${t(lang,'detail_status')}:</b>  ${statusTxt}\n<b>⟡</b>  <b>${t(lang,'detail_install')}:</b>  ${l.installId?`<code>${l.installId.substring(0,16)}…</code>`:`<i>${t(lang,'detail_not_linked')}</i>`}\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<code>${progressBar(pct)}</code> ${pct}%`, { inline_keyboard: [[{ text: l.installId ? t(lang,'act_unlink') : t(lang,'act_link'), callback_data: l.installId?`dv_${k}`:`v_${k}` }],[{ text: t(lang,'act_revoke'), callback_data:`rv_${k}` }, { text: t(lang,'act_delete'), callback_data:`dl_${k}` }],[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); return; }
+    if (data.startsWith('v_')) { const k = data.substring(2); await tgAnswer(cb.id); return tgEdit(chatId, msgId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'act_link')}</b>\n<code>/activate &lt;installId&gt; ${k}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
     if (data.startsWith('dv_')) { const k = data.substring(3), l = await redisGet(k); if (l) { l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); } await tgAnswer(cb.id, '⌬'); return tgEdit(chatId, msgId, `✓ ${t(lang,'act_unlink')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
     if (data.startsWith('rv_')) { const k = data.substring(3), l = await redisGet(k); if (l) { l.ativa = false; await redisSet(k, JSON.stringify(l)); } await tgAnswer(cb.id, '✕'); return tgEdit(chatId, msgId, `✕ ${t(lang,'act_revoke')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
     if (data.startsWith('dl_')) { const k = data.substring(3); await redisDel(k); await tgAnswer(cb.id, '✕'); return tgEdit(chatId, msgId, `✕ ${t(lang,'act_delete')}`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); }
@@ -249,14 +294,14 @@ async function handleMessage(msg) {
     SUPPORT_SESSIONS.delete(String(chatId));
     const userInfo = `${msg.from.first_name||''} ${msg.from.last_name||''}`.trim() || 'Sem nome';
     const username = msg.from.username ? `@${msg.from.username}` : 'sem username';
-    await tgSend(chatId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'support_sent')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n${t(lang,'support_sent_desc')}\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${lang==='en'?'You will receive the reply here.':'Você receberá a resposta aqui.'}</i>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
+    await tgSend(chatId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>${t(lang,'support_sent')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n${t(lang,'support_sent_desc')}\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${lang==='en'?'You will receive the reply here.':'Você receberá a resposta aqui.'}</i>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
     if (!isOwner) { await tgSend(OWNER_ID, `<b>◈ ──『 ✆ NOVA MENSAGEM 』── ◈</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◉  Nome:</b> ${userInfo}\n<b>◈  User:</b> ${username}\n<b>⌬  Chat ID:</b> <code>${chatId}</code>\n<b>◐  Idioma:</b> ${lang.toUpperCase()}\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>✎  Mensagem:</b>\n${texto}\n\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>Responda com:</i>\n<code>/resp ${chatId} sua mensagem</code>`); }
     log('SUPPORT', `Msg de ${chatId}: ${texto.substring(0,50)}`); return;
   }
   if (!isOwner) {
     if (cmd === '/start' || cmd === '/contacto' || cmd === '/contact' || cmd === '/ajuda' || cmd === '/help' || cmd === '/lang') {
       if (cmd === '/lang') { await tgSend(chatId, `<b>◐  ${t(lang,'lang_select')}</b>`, { inline_keyboard: [[{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]] }); return; }
-      await tgSend(chatId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>◈  ${t(lang,'welcome_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]] }); return;
+      await tgSend(chatId, `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.3.1</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>◈  ${t(lang,'welcome_title')}</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]] }); return;
     }
     return;
   }
@@ -279,12 +324,12 @@ async function handleMessage(msg) {
 
 app.post('/telegram-webhook', async (req, res) => { res.sendStatus(200); const update = req.body; try { if (update.callback_query) return handleCallback(update.callback_query); if (update.message && update.message.text) return handleMessage(update.message); } catch (e) { log('ERRO', 'Webhook: ' + e.message); } });
 
-const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.3',codename:'Aurora++',timestamp:new Date().toISOString()});
-app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3',status:'live'}));
+const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.3.1',codename:'Aurora++',timestamp:new Date().toISOString()});
+app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3.1',status:'live'}));
 app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
-const versionHandler = (req,res)=>res.json({ok:true,version:'8.3',codename:'Aurora++',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
+const versionHandler = (req,res)=>res.json({ok:true,version:'8.3.1',codename:'Aurora++',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
 app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
-const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3',hora:new Date().toISOString()});
+const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3.1',hora:new Date().toISOString()});
 app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
 
 function bootstrapHandler(req,res){
@@ -295,7 +340,7 @@ function bootstrapHandler(req,res){
   const encPack = encryptPack({ rules: PAYMENT_RULES, version: RULES_VERSION }, keyBase64);
   log('BOOT',`Bootstrap (auth=${auth.ok}) installId=${installId.substring(0,12)}... prov=${prov?'✓':'✗'} encPack=${encPack.ct.length}b`);
   res.json({
-    ok:true, version:'8.3', codename:'Aurora++', apiVersion:'v1',
+    ok:true, version:'8.3.1', codename:'Aurora++', apiVersion:'v1',
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:'premium', sourceType:'server', isFounder:true, tier:'premium', kind:'premium',
     rulesVersion: RULES_VERSION,
@@ -309,16 +354,27 @@ function bootstrapHandler(req,res){
     limits:{...PREMIUM_LIMITS},scope:PREMIUM_SCOPE
   });
 }
-app.get('/v1/bootstrap',bootstrapHandler);
-app.get('/api/v1/bootstrap',bootstrapHandler);
+app.get('/v1/bootstrap',bootstrapHandler); app.get('/api/v1/bootstrap',bootstrapHandler);
 
-function rulesHandler(req,res){ const auth=validateBearer(req); const installId = req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default'); const prov = generateProv(installId); res.json({ ok:true, version: RULES_VERSION, updatedAt:new Date().toISOString(), source:'premium', tier:'premium', scope: PREMIUM_SCOPE, count: PAYMENT_RULES.length, rules: PAYMENT_RULES, _prov: prov, serverTime:Date.now() }); }
+function rulesHandler(req,res){
+  const auth=validateBearer(req);
+  const installId = req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
+  const prov = generateProv(installId);
+  const packFmt = req.headers['x-asheo-pack-fmt'];
+  if (packFmt === 'enc') {
+    const keyBase64 = crypto.randomBytes(32).toString('base64');
+    const encPack = encryptPack({ rules: PAYMENT_RULES, version: RULES_VERSION }, keyBase64);
+    log('RULES',`/v1/rules enc mode — encPack=${encPack.ct.length}b`);
+    return res.json({ ok:true, version: RULES_VERSION, pack: { encPack } , _prov: prov, serverTime:Date.now() });
+  }
+  res.json({ ok:true, version: RULES_VERSION, updatedAt:new Date().toISOString(), source:'premium', tier:'premium', scope: PREMIUM_SCOPE, count: PAYMENT_RULES.length, rules: PAYMENT_RULES, _prov: prov, serverTime:Date.now() });
+}
 app.get('/v1/rules',rulesHandler); app.get('/api/v1/rules',rulesHandler); app.get('/v1/rules/sync',rulesHandler); app.get('/api/v1/sync',rulesHandler);
 
 function gatewaysHandler(req,res){ const auth=validateBearer(req); const installId = req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default'); const prov = generateProv(installId); res.json({ ok:true, source:'premium', tier:'premium', version: RULES_VERSION, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES, gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() }); }
 app.get('/v1/gateways',gatewaysHandler); app.get('/api/v1/gateways',gatewaysHandler);
 
-function campaignHandler(req,res){ res.json({ok:true,source:'premium',tier:'premium',campaigns:CAMPAIGNS,serverTime:Date.now()}); }
+function campaignHandler(req,res){ res.json({ ok:true, campaign: null, serverTime:Date.now() }); }
 app.get('/v1/campaign',campaignHandler); app.get('/api/v1/campaign',campaignHandler);
 
 function exclusiveHandler(req,res){ res.json({ok:true,source:'premium',tier:'premium',manifest:{version:'1.7.0',version_name:'1.7.0',generatedAt:new Date().toISOString(),minVersion:'1.0.0',exclusiveFeatures:Object.keys(PREMIUM_FEATURES),rules:PAYMENT_RULES,gateways:GATEWAYS_META,signature:crypto.randomBytes(64).toString('hex')},cachedAt:Date.now(),expiresAt:Date.now()+(23*3600*1000)}); }
@@ -329,10 +385,10 @@ app.get('/v1/exclusive/sync',exclusiveSyncHandler); app.get('/api/v1/exclusive/s
 function dashboardHandler(req,res){ const auth=validateBearer(req); const ok=auth.ok&&auth.decoded.tier==='premium'; res.json({ok:true,source:ok?'premium':'free',sourceType:'server',isFounder:true, dashboard:{tier:ok?'premium':'free',source:ok?'premium':'free',seat:auth.ok?1:0,seats:auth.ok?1:0,installId:auth.ok?auth.decoded.sub:null,expiresAt:auth.ok?auth.decoded.expiresAt:null,lifetime:auth.ok?auth.decoded.lifetime===true:false,features:ok?mapFeatures(true):mapFeatures(false),capabilities:ok?mapCapabilities(true):mapCapabilities(false),limits:ok?PREMIUM_LIMITS:FREE_LIMITS,scope:ok?PREMIUM_SCOPE:['free']},serverTime:Date.now()}); }
 app.get('/v1/dashboard',dashboardHandler); app.get('/api/v1/dashboard',dashboardHandler);
 
-function entitlementHandler(req,res){ const auth=validateBearer(req); if(!auth.ok)return res.status(401).json({ok:false,error:'missing_bearer'}); res.json({ok:true,source:'premium',sourceType:'server',isFounder:true,tier:'premium',kind:'premium',active:true,isPremium:true,isVerified:true,installId:auth.decoded.sub,plan:'premium',planDisplayName:'Premium',lifetime:auth.decoded.lifetime===true,licenseKey:auth.decoded.licenseKey,issuedAt:auth.decoded.issuedAt,expiresAt:auth.decoded.expiresAt,scope:PREMIUM_SCOPE,features:mapFeatures(true),capabilities:mapCapabilities(true),limits:{...PREMIUM_LIMITS},exp:auth.decoded.exp*1000,serverTime:Date.now()}); }
+function entitlementHandler(req,res){ const auth=validateBearer(req); if(!auth.ok)return res.status(401).json({ok:false,error:'missing_bearer'}); const ent = buildEntitlement(null, auth.decoded.sub); res.json({ok:true,source:'premium',sourceType:'server',isFounder:false,tier:ent.tier,kind:'premium',active:true,isPremium:true,isVerified:true,installId:auth.decoded.sub,plan:ent.plan,planDisplayName:ent.planDisplayName,lifetime:auth.decoded.lifetime===true,licenseKey:auth.decoded.licenseKey,issuedAt:auth.decoded.issuedAt,expiresAt:auth.decoded.expiresAt,scope:PREMIUM_SCOPE,features:mapFeatures(true),capabilities:mapCapabilities(true),limits:{...PREMIUM_LIMITS},exp:auth.decoded.exp*1000,serverTime:Date.now()}); }
 app.get('/v1/entitlement',entitlementHandler); app.get('/api/v1/entitlement',entitlementHandler);
 
-function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.3'});}
+function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.3.1'});}
 app.get('/v1/premium/definitions',premiumDefHandler); app.get('/api/v1/premium/definitions',premiumDefHandler);
 
 function planosHandler(req,res){res.json({ok:true,currency:'USD',planos:Object.entries(PACOTES).map(([id,p])=>({id,nome:p.nome,dias:p.dias,lifetime:p.lifetime,preco:p.preco,preco_fmt:precoFmt(p.preco),emoji:p.emoji}))});}
@@ -351,27 +407,147 @@ function supportHandler(req,res){ const {chatId,message}=req.body||{}; if(!messa
 app.post('/v1/support',supportHandler); app.post('/api/v1/support',supportHandler);
 
 async function activateHandler(req,res){
-  const inicio=Date.now();
-  const {installId,licenseKey,clientTag}=req.body||{};
-  log('INFO',`Activate: installId=${installId?installId.substring(0,12)+'...':'?'} | key=${licenseKey?normalizeKey(licenseKey).substring(0,18)+'...':'(vazia)'} | tag=${clientTag||'?'}`);
-  if(!licenseKey&&!installId){ const auth=validateBearer(req); if(!auth.ok)return res.status(401).json({ok:false,error:'missing_auth'}); const feature=(req.body&&req.body.feature)||req.query.feature; if(!feature)return res.status(400).json({ok:false,error:'missing_feature'}); if(!PREMIUM_FEATURES[feature])return res.status(404).json({ok:false,error:'unknown_feature'}); const now=Math.floor(Date.now()/1000); const token=jwt.sign({sub:auth.decoded.sub,installId:auth.decoded.sub,feature,kind:'feature',type:'feature',tier:'premium',source:'premium',isFounder:true,scope:[feature,'premium'],iat:now,nbf:now-5,exp:now+300,jti:crypto.randomUUID()},PRIVATE_KEY,{algorithm:'ES256'}); log('FEAT',`✓ ${feature} | ${auth.decoded.sub} | ${Date.now()-inicio}ms`); return res.json({ok:true,token,feature,expires_in:300,exp:now+300}); }
-  if(!installId||typeof installId!=='string'||installId.length<5)return res.status(400).json({error:'missing_installId'});
-  if(!PRIVATE_KEY)return res.status(500).json({error:'server_misconfigured'});
-  if(!licenseKey||typeof licenseKey!=='string'||!licenseKey.toUpperCase().startsWith('ASHEO-'))return res.status(401).json({error:'missing_license'});
-  const keyNorm=normalizeKey(licenseKey);
-  const lic=await redisGet(keyNorm);
-  if(!lic){log('WARN',`NAO ENCONTRADA: ${keyNorm.substring(0,18)}...`);return res.status(404).json({error:'invalid_license'});}
-  if(!lic.ativa)return res.status(403).json({error:'revoked'});
-  if(!lic.lifetime && Date.now() > lic.expiraEm){ log('WARN',`EXPIRADA: ${keyNorm.substring(0,18)}...`); return res.status(403).json({error:'expired',message:'Esta licença expirou. Renove para continuar.',expiredAt: lic.expiraEm,expiredAtISO: new Date(lic.expiraEm).toISOString()}); }
-  if(!lic.installId){lic.installId=installId;lic.ativadaEm=Date.now();await redisSet(keyNorm,JSON.stringify(lic));log('OK',`Vinculada: ${keyNorm.substring(0,18)}... -> ${installId}`);}
-  else if(lic.installId!==installId)return res.status(403).json({error:'already_used'});
-  try{ const claims = buildClaims(installId, lic); const token=signToken(claims); const expiresIn = lic.lifetime ? -1 : Math.max(0, Math.floor((lic.expiraEm - Date.now())/1000)); log('ATIV',`✓ ${installId.substring(0,12)}... | ${keyNorm.substring(0,18)}... | expira em ${expiresIn}s | ${Date.now()-inicio}ms`); return res.json({token,tier:'premium',kind:'premium',source:'premium',sourceType:'server',isFounder:true,seat:1,seats:1,gwPass:null,plan:'premium',planDisplayName:'Premium',lifetime:lic.lifetime===true,expiresIn,expiresAt: lic.lifetime ? null : lic.expiraEm,expiresAtISO: lic.lifetime ? null : new Date(lic.expiraEm).toISOString(),issuedAt: lic.criadaEm,issuedAtISO: new Date(lic.criadaEm).toISOString(),licenseKey:keyNorm,welcome: {pt: '🎉 Parabéns! Licença ativada com sucesso.',en: '🎉 Congratulations! License successfully activated.'}}); }catch(e){return res.status(500).json({error:'internal',message:e.message});}
-}
-app.post('/v1/activate',activateHandler); app.post('/api/v1/activate',activateHandler); app.post('/api/v1/license/activate',activateHandler);
+  const inicio = Date.now();
+  const { installId, licenseKey, clientTag, deviceLabel, buildFingerprint, installType } = req.body || {};
+  log('INFO', `Activate: installId=${installId ? installId.substring(0,12)+'...' : '?'} | key=${licenseKey ? normalizeKey(licenseKey).substring(0,18)+'...' : '(vazia)'} | tag=${clientTag||'?'} | type=${installType||'?'}`);
 
-async function featureActivateHandler(req,res){ const auth=validateBearer(req); if(!auth.ok)return res.status(401).json({ok:false,error:'missing_bearer'}); const feature=(req.body&&req.body.feature)||req.query.feature; if(!feature)return res.status(400).json({ok:false,error:'missing_feature'}); if(!PREMIUM_FEATURES[feature])return res.status(404).json({ok:false,error:'unknown_feature'}); const now=Math.floor(Date.now()/1000); const token=jwt.sign({sub:auth.decoded.sub,installId:auth.decoded.sub,feature,kind:'feature',type:'feature',tier:'premium',source:'premium',isFounder:true,scope:[feature,'premium'],iat:now,nbf:now-5,exp:now+300,jti:crypto.randomUUID()},PRIVATE_KEY,{algorithm:'ES256'}); res.json({ok:true,token,feature,expires_in:300,exp:now+300}); }
-app.post('/v1/feature/activate',featureActivateHandler); app.get('/v1/feature/activate',featureActivateHandler);
-app.post('/api/v1/feature/activate',featureActivateHandler); app.get('/api/v1/feature/activate',featureActivateHandler);
+  if (!installId || typeof installId !== 'string' || installId.length < 5) {
+    return res.status(400).json({ error: 'missing_installId' });
+  }
+  if (!PRIVATE_KEY) {
+    return res.status(500).json({ error: 'server_misconfigured' });
+  }
+
+  if (!licenseKey || typeof licenseKey !== 'string' || licenseKey.trim() === '') {
+    const now = Math.floor(Date.now()/1000);
+    const ent = buildEntitlement(null, installId);
+    const secret = crypto.createHash('sha256').update(installId + ':guest').digest('hex');
+    const claims = {
+      sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId,
+      plan: 'free', planDisplayName: 'Free', tier: 'free', kind: 'license',
+      status: 'inactive', active: false, isPremium: false, isVerified: false,
+      source: 'free', sourceType: 'server', isFounder: false, lifetime: false,
+      scope: ['free'], features: {}, capabilities: {}, limits: { ...FREE_LIMITS },
+      secret, iat: now, nbf: now - 5, exp: now + (30 * 24 * 60 * 60), jti: crypto.randomUUID()
+    };
+    const token = signToken(claims);
+    const gwPass = buildGwPass(installId);
+    log('ATIV', `✓ Guest token para ${installId.substring(0,12)}... | ${Date.now()-inicio}ms`);
+    return res.json({
+      token,
+      tier: 'free',
+      secret,
+      kind: 'event',
+      seat: 0,
+      seats: 1,
+      deviceId: installId,
+      entitlement: ent,
+      sub: installId,
+      kid: null,
+      keyName: null,
+      jti: claims.jti,
+      iat: now,
+      exp: now + (30 * 24 * 60 * 60),
+      gwPass
+    });
+  }
+
+  if (!licenseKey.toUpperCase().startsWith('ASHEO-')) {
+    return res.status(401).json({ error: 'missing_license' });
+  }
+
+  const keyNorm = normalizeKey(licenseKey);
+  const lic = await redisGet(keyNorm);
+  if (!lic) {
+    log('WARN', `NAO ENCONTRADA: ${keyNorm.substring(0,18)}...`);
+    return res.status(404).json({ error: 'invalid_license' });
+  }
+  if (!lic.ativa) {
+    return res.status(403).json({ error: 'revoked' });
+  }
+  if (!lic.lifetime && Date.now() > lic.expiraEm) {
+    log('WARN', `EXPIRADA: ${keyNorm.substring(0,18)}...`);
+    return res.status(403).json({ error: 'expired', message: 'Esta licença expirou. Renove para continuar.', expiredAt: lic.expiraEm, expiredAtISO: new Date(lic.expiraEm).toISOString() });
+  }
+
+  if (!lic.installId) {
+    lic.installId = installId;
+    lic.ativadaEm = Date.now();
+    await redisSet(keyNorm, JSON.stringify(lic));
+    log('OK', `Vinculada: ${keyNorm.substring(0,18)}... -> ${installId}`);
+  } else if (lic.installId !== installId) {
+    return res.status(403).json({ error: 'already_used' });
+  }
+
+  try {
+    const now = Math.floor(Date.now()/1000);
+    const ent = buildEntitlement(lic, installId);
+    const isLife = lic.plano === 'life';
+    const expSec = isLife ? now + (100 * 365 * 24 * 60 * 60) : Math.floor(lic.expiraEm / 1000);
+    const secret = crypto.createHash('sha256').update(installId + (lic.chave || '')).digest('hex');
+    const claims = {
+      sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId,
+      plan: ent.plan, planDisplayName: ent.planDisplayName, tier: ent.tier, kind: 'license',
+      status: ent.status, active: true, isPremium: true, isVerified: true,
+      source: 'premium', sourceType: 'server', isFounder: false,
+      lifetime: isLife, plano: lic.plano, licenseKey: lic.chave,
+      issuedAt: lic.criadaEm, expiresAt: lic.expiraEm,
+      scope: PREMIUM_SCOPE, features: mapFeatures(true), capabilities: mapCapabilities(true),
+      limits: { ...PREMIUM_LIMITS },
+      secret,
+      iat: now, nbf: now - 5, exp: expSec, jti: crypto.randomUUID()
+    };
+    const token = signToken(claims);
+    const gwPass = buildGwPass(installId);
+    const expiresIn = isLife ? -1 : Math.max(0, Math.floor((lic.expiraEm - Date.now())/1000));
+    log('ATIV', `✓ ${installId.substring(0,12)}... | ${keyNorm.substring(0,18)}... | expira em ${expiresIn}s | ${Date.now()-inicio}ms`);
+    return res.json({
+      token,
+      tier: ent.tier,
+      secret,
+      kind: 'event',
+      seat: 1,
+      seats: ent.seatsAllowed,
+      deviceId: installId,
+      entitlement: ent,
+      sub: installId,
+      kid: lic.chave ? lic.chave.substring(0, 14) : null,
+      keyName: null,
+      jti: claims.jti,
+      iat: now,
+      exp: expSec,
+      gwPass,
+      expiresIn,
+      expiresAt: lic.expiraEm,
+      issuedAt: lic.criadaEm,
+      licenseKey: keyNorm,
+      welcome: { pt: '🎉 Parabéns! Licença ativada com sucesso.', en: '🎉 Congratulations! License successfully activated.' }
+    });
+  } catch (e) {
+    return res.status(500).json({ error: 'internal', message: e.message });
+  }
+}
+app.post('/v1/activate', activateHandler); app.post('/api/v1/activate', activateHandler); app.post('/api/v1/license/activate', activateHandler);
+
+async function featureActivateHandler(req, res) {
+  const auth = validateBearer(req);
+  if (!auth.ok) return res.status(401).json({ ok: false, error: 'missing_bearer' });
+  const feature = (req.body && req.body.feature) || req.query.feature;
+  if (!feature) return res.status(400).json({ ok: false, error: 'missing_feature' });
+  if (!PREMIUM_FEATURES[feature]) return res.status(404).json({ ok: false, error: 'unknown_feature' });
+
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + 300;
+  const nonce = jwt.sign(
+    { sub: auth.decoded.sub, installId: auth.decoded.sub, feature, kind: 'feature', type: 'feature', tier: 'premium', source: 'premium', scope: [feature, 'premium'], iat: now, nbf: now - 5, exp, jti: crypto.randomUUID() },
+    PRIVATE_KEY,
+    { algorithm: 'ES256' }
+  );
+  log('FEAT', `✓ ${feature} | ${auth.decoded.sub.substring(0,12)}...`);
+  res.json({ nonce, feature, expiresAt: exp * 1000 });
+}
+app.post('/v1/feature/activate', featureActivateHandler); app.get('/v1/feature/activate', featureActivateHandler);
+app.post('/api/v1/feature/activate', featureActivateHandler); app.get('/api/v1/feature/activate', featureActivateHandler);
 
 async function deactivateHandler(req,res){ const {installId,licenseKey}=req.body||{}; if(licenseKey){ const lic=await redisGet(licenseKey); if(lic&&lic.installId===installId){lic.installId=null;lic.ativadaEm=null;await redisSet(licenseKey,JSON.stringify(lic));} } res.json({ok:true,message:'Desativado'}); }
 app.post('/v1/deactivate',deactivateHandler); app.post('/api/v1/deactivate',deactivateHandler); app.post('/api/v1/license/deactivate',deactivateHandler);
@@ -386,22 +562,24 @@ app.post('/api/v1/heartbeat',heartbeatHandler); app.get('/api/v1/heartbeat',hear
 
 app.use((req,res)=>{res.status(404).json({ok:false,error:'not_found',path:req.path});});
 
-const PORT=process.env.PORT||3000;
-app.listen(PORT,()=>{
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
   banner();
-  log('SYS',`Mozlince Nebula v8.3 Aurora++ na porta ${PORT}`);
-  log('SYS',`Chave: ${ORIGEM}`);
-  log('SYS',`Redis: ${UPSTASH_URL?'OK':'FALTA'}`);
-  log('SYS',`Telegram: ${TELEGRAM_TOKEN?'OK':'FALTA'}`);
-  log('SYS',`Planos: ${Object.keys(PACOTES).length} (USD)`);
-  log('RULES',`✔ Payment Rules carregadas: ${PAYMENT_RULES.length} regras (v${RULES_VERSION})`);
-  log('RULES',`✔ /v1/bootstrap entrega encPack AES-GCM + k + _prov ES256`);
-  log('RULES',`✔ /v1/rules entrega regras em texto puro`);
-  log('RULES',`✔ /v1/gateways e /v1/campaign integrados`);
-  log('OK', `✔ Expiração REAL — 3d/7d/15d… expiram na hora exata`);
+  log('SYS', `Mozlince Nebula v8.3.1 Aurora++ na porta ${PORT}`);
+  log('SYS', `Chave: ${ORIGEM}`);
+  log('SYS', `Redis: ${UPSTASH_URL ? 'OK' : 'FALTA'}`);
+  log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA'}`);
+  log('SYS', `Planos: ${Object.keys(PACOTES).length} (USD)`);
+  log('RULES', `✔ Payment Rules carregadas: ${PAYMENT_RULES.length} regras (v${RULES_VERSION})`);
+  log('RULES', `✔ /v1/activate formato Asheo (entitlement + secret + gwPass)`);
+  log('RULES', `✔ /v1/feature/activate formato Asheo (nonce + feature + expiresAt)`);
+  log('RULES', `✔ /v1/rules modo enc (pack.encPack)`);
+  log('RULES', `✔ /v1/campaign formato Asheo ({ campaign: null })`);
+  log('OK', `✔ Aceita licenseKey vazia (guest token)`);
+  log('OK', `✔ Expiração REAL`);
   log('OK', `✔ Tradução TOTAL PT/EN`);
   log('OK', `✔ Suporte interativo + /resp`);
 });
 
-process.on('uncaughtException',e=>log('ERRO','Uncaught: '+e.message));
-process.on('unhandledRejection',e=>log('ERRO','Rejection: '+e));
+process.on('uncaughtException', e => log('ERRO', 'Uncaught: ' + e.message));
+process.on('unhandledRejection', e => log('ERRO', 'Rejection: ' + e));
