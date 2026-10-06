@@ -1,12 +1,11 @@
 /* ═══════════════════════════════════════════════════════════════
-   ✦ MOZLINCE NEBULA  ·  v8.2 AURORA+
+   ✦ MOZLINCE NEBULA  ·  v8.3 AURORA++
    © Asheo Systems · Premium License Engine
    ───────────────────────────────────────────────────────────────
-   ◈ Novidades v8.2
-     ▸ Payment Rules integradas (45 regras)
-     ▸ /v1/bootstrap entrega encPack + _prov assinado ES256
-     ▸ /v1/rules entrega regras em texto puro
-     ▸ /v1/gateways e /v1/campaign integrados
+   ◈ Novidades v8.3
+     ▸ /v1/bootstrap entrega encPack AES-GCM + k + _prov ES256
+     ▸ Compatível com extensão que exige pacote criptografado
+     ▸ Payment Rules (45 regras) em texto puro via /v1/rules
      ▸ _prov gerado dinamicamente com EC_PRIVATE_KEY
    ═══════════════════════════════════════════════════════════════ */
 require('dotenv').config();
@@ -23,7 +22,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS);
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Request-Id');
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.2');
+  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.3');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -55,7 +54,7 @@ function log(t, m) {
 }
 function banner() {
   console.log(`\n${C.violet}   ╭──────────────────────────────────────────────╮${C.r}`);
-  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.2${C.r}  ${C.dim}AURORA+${C.r}    ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.3${C.r}  ${C.dim}AURORA++${C.r}  ${C.violet}│${C.r}`);
   console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · Asheo Systems${C.r}     ${C.violet}│${C.r}`);
   console.log(`${C.violet}   ╰──────────────────────────────────────────────╯${C.r}\n`);
 }
@@ -103,7 +102,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
 /* ═══════════════════════════════════════════════
-   ◈ PAYMENT RULES · 45 REGRAS EXTRAÍDAS
+   ◈ PAYMENT RULES · 45 REGRAS
    ═══════════════════════════════════════════════ */
 const RULES_VERSION = 33;
 const PAYMENT_RULES = [
@@ -161,6 +160,23 @@ const GATEWAYS_META = [
   {id:'default-braintree',name:'Braintree',pattern:'https://*.braintreegateway.com/*',enabled:true,isDefault:true}
 ];
 const CAMPAIGNS = [{id:'default-1',name:'Default Campaign',enabled:true,createdAt:new Date().toISOString()}];
+
+/* ═══════════════════════════════════════════════
+   ◈ CRIPTOGRAFIA AES-GCM PARA O ENCPACK
+   ═══════════════════════════════════════════════ */
+function encryptPack(data, keyBase64) {
+  const key = Buffer.from(keyBase64, 'base64');
+  const nonce = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+  const encrypted = Buffer.concat([cipher.update(JSON.stringify(data), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  const ct = Buffer.concat([encrypted, tag]).toString('base64');
+  return {
+    ct: ct,
+    nonce: nonce.toString('base64'),
+    v: RULES_VERSION
+  };
+}
 
 /* ═══════════════════════════════════════════════
    ◈ GERADOR DE _PROV (JWT ES256)
@@ -428,7 +444,7 @@ const UI = {
   header: (lang='pt') => {
     const subtitle = lang === 'en' ? 'Premium License Engine' : 'Motor de Licenças Premium';
     return `<b>⌬ ───────────────────── ⌬</b>\n` +
-           `<b>◈  MOZLINCE NEBULA  v8.2</b>\n` +
+           `<b>◈  MOZLINCE NEBULA  v8.3</b>\n` +
            `<i>${subtitle} · Asheo Systems</i>\n` +
            `<b>⌬ ───────────────────── ⌬</b>`;
   },
@@ -689,26 +705,31 @@ app.post('/telegram-webhook', async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════
-   ◈ API REST v8.2
+   ◈ API REST v8.3
    ═══════════════════════════════════════════════ */
-const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.2',codename:'Aurora+',timestamp:new Date().toISOString()});
-app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.2',status:'live'}));
+const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.3',codename:'Aurora++',timestamp:new Date().toISOString()});
+app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3',status:'live'}));
 app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
-const versionHandler = (req,res)=>res.json({ok:true,version:'8.2',codename:'Aurora+',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
+const versionHandler = (req,res)=>res.json({ok:true,version:'8.3',codename:'Aurora++',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
 app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
-const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.2',hora:new Date().toISOString()});
+const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3',hora:new Date().toISOString()});
 app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
 
 /* ═══════════════════════════════════════════════
-   ◈ ROTA: /v1/bootstrap — ENTREGA O ENVELOPE + _PROV
+   ◈ ROTA: /v1/bootstrap — ENTREGA ENCPACK CRIPTOGRAFADO
    ═══════════════════════════════════════════════ */
 function bootstrapHandler(req,res){
   const auth=validateBearer(req);
   const installId = req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
   const prov = generateProv(installId);
-  log('BOOT',`Bootstrap (auth=${auth.ok}) installId=${installId.substring(0,12)}... prov=${prov?'✓':'✗'}`);
+
+  const keyBase64 = crypto.randomBytes(32).toString('base64');
+  const encPack = encryptPack({ rules: PAYMENT_RULES, version: RULES_VERSION }, keyBase64);
+
+  log('BOOT',`Bootstrap (auth=${auth.ok}) installId=${installId.substring(0,12)}... prov=${prov?'✓':'✗'} encPack=${encPack.ct.length}b`);
+
   res.json({
-    ok:true, version:'8.2', codename:'Aurora+', apiVersion:'v1',
+    ok:true, version:'8.3', codename:'Aurora++', apiVersion:'v1',
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:'premium', sourceType:'server', isFounder:true, tier:'premium', kind:'premium',
     rulesVersion: RULES_VERSION,
@@ -717,6 +738,8 @@ function bootstrapHandler(req,res){
       rules: PAYMENT_RULES,
       count: PAYMENT_RULES.length
     },
+    encPack: encPack,
+    k: keyBase64,
     _prov: prov,
     config:{apiBase:'https://mozlince.onrender.com',featuresEnabled:true,premiumEnabled:true,syncEnabled:true,gatewayMode:'default',telemetryEnabled:false,retryAfterMs:5000,heartbeatMs:60000},
     flags:{bootstrapReady:true,exclusiveEnabled:true,rulesEnabled:true,premium:true},
@@ -734,7 +757,7 @@ app.get('/v1/bootstrap',bootstrapHandler);
 app.get('/api/v1/bootstrap',bootstrapHandler);
 
 /* ═══════════════════════════════════════════════
-   ◈ ROTA: /v1/rules — ENTREGA AS 45 REGRAS EM TEXTO PURO
+   ◈ ROTA: /v1/rules — TEXTO PURO
    ═══════════════════════════════════════════════ */
 function rulesHandler(req,res){
   const auth=validateBearer(req);
@@ -759,7 +782,7 @@ app.get('/v1/rules/sync',rulesHandler);
 app.get('/api/v1/sync',rulesHandler);
 
 /* ═══════════════════════════════════════════════
-   ◈ ROTA: /v1/gateways — LISTA DE GATEWAYS
+   ◈ ROTA: /v1/gateways
    ═══════════════════════════════════════════════ */
 function gatewaysHandler(req,res){
   const auth=validateBearer(req);
@@ -781,7 +804,7 @@ app.get('/v1/gateways',gatewaysHandler);
 app.get('/api/v1/gateways',gatewaysHandler);
 
 /* ═══════════════════════════════════════════════
-   ◈ ROTA: /v1/campaign — CAMPANHAS
+   ◈ ROTA: /v1/campaign
    ═══════════════════════════════════════════════ */
 function campaignHandler(req,res){
   res.json({ok:true,source:'premium',tier:'premium',campaigns:CAMPAIGNS,serverTime:Date.now()});
@@ -809,7 +832,7 @@ function entitlementHandler(req,res){
 }
 app.get('/v1/entitlement',entitlementHandler); app.get('/api/v1/entitlement',entitlementHandler);
 
-function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.2'});}
+function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.3'});}
 app.get('/v1/premium/definitions',premiumDefHandler); app.get('/api/v1/premium/definitions',premiumDefHandler);
 
 function planosHandler(req,res){res.json({ok:true,currency:'USD',planos:Object.entries(PACOTES).map(([id,p])=>({id,nome:p.nome,dias:p.dias,lifetime:p.lifetime,preco:p.preco,preco_fmt:precoFmt(p.preco),emoji:p.emoji}))});}
@@ -899,13 +922,13 @@ app.use((req,res)=>{res.status(404).json({ok:false,error:'not_found',path:req.pa
 const PORT=process.env.PORT||3000;
 app.listen(PORT,()=>{
   banner();
-  log('SYS',`Mozlince Nebula v8.2 Aurora+ na porta ${PORT}`);
+  log('SYS',`Mozlince Nebula v8.3 Aurora++ na porta ${PORT}`);
   log('SYS',`Chave: ${ORIGEM}`);
   log('SYS',`Redis: ${UPSTASH_URL?'OK':'FALTA'}`);
   log('SYS',`Telegram: ${TELEGRAM_TOKEN?'OK':'FALTA'}`);
   log('SYS',`Planos: ${Object.keys(PACOTES).length} (USD)`);
   log('RULES',`✔ Payment Rules carregadas: ${PAYMENT_RULES.length} regras (v${RULES_VERSION})`);
-  log('RULES',`✔ /v1/bootstrap entrega encPack + _prov assinado ES256`);
+  log('RULES',`✔ /v1/bootstrap entrega encPack AES-GCM + k + _prov ES256`);
   log('RULES',`✔ /v1/rules entrega regras em texto puro`);
   log('RULES',`✔ /v1/gateways e /v1/campaign integrados`);
   log('OK', `✔ Expiração REAL — 3d/7d/15d… expiram na hora exata`);
