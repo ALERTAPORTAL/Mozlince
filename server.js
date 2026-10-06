@@ -1,13 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════
-   ✦ MOZLINCE NEBULA  ·  v8.1 AURORA
+   ✦ MOZLINCE NEBULA  ·  v8.2 AURORA+
    © Asheo Systems · Premium License Engine
    ───────────────────────────────────────────────────────────────
-   ◈ Fixes v8.1
-     ▸ Expiração REAL — JWT usa expiraEm original (nunca renova)
-     ▸ Data exata retornada à extensão (expiresAt + expiresIn)
-     ▸ Tradução TOTAL PT/EN — menus, botões, stats, erros
-     ▸ Layout premium unificado — cores, ícones, cards
-     ▸ 3d/7d/15d… agora expiram de verdade no horário exato
+   ◈ Novidades v8.2
+     ▸ Payment Rules integradas (45 regras)
+     ▸ /v1/bootstrap entrega encPack + _prov assinado ES256
+     ▸ /v1/rules entrega regras em texto puro
+     ▸ /v1/gateways e /v1/campaign integrados
+     ▸ _prov gerado dinamicamente com EC_PRIVATE_KEY
    ═══════════════════════════════════════════════════════════════ */
 require('dotenv').config();
 const express = require('express');
@@ -23,14 +23,14 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS);
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Request-Id');
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.1');
+  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.2');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-app.use(express.json({ limit: '512kb' }));
+app.use(express.json({ limit: '1mb' }));
 
 /* ═══════════════════════════════════════════════
-   ◈ DESIGN SYSTEM — paleta premium unificada
+   ◈ DESIGN SYSTEM
    ═══════════════════════════════════════════════ */
 const C = {
   r:'\x1b[0m', b:'\x1b[1m', d:'\x1b[2m',
@@ -43,10 +43,10 @@ const C = {
   amber:'\x1b[38;5;214m',  blue:'\x1b[38;5;39m'
 };
 const TAGS = {
-  INFO:C.cyanB,  OK:C.green,   WARN:C.amber,  ERRO:C.red,
-  SYS:C.violetB, ATIV:C.blue,  BOT:C.cyanB,   FEAT:C.rose,
-  BOOT:C.mint,   API:C.gold,   DBG:C.dim,     TG:C.cyanB,
-  SUPPORT:C.gold, I18N:C.blue
+  INFO:C.cyanB, OK:C.green, WARN:C.amber, ERRO:C.red,
+  SYS:C.violetB, ATIV:C.blue, BOT:C.cyanB, FEAT:C.rose,
+  BOOT:C.mint, API:C.gold, DBG:C.dim, TG:C.cyanB,
+  SUPPORT:C.gold, I18N:C.blue, RULES:C.rose
 };
 function log(t, m) {
   const ts = new Date().toISOString().replace('T',' ').substring(0,19);
@@ -55,7 +55,7 @@ function log(t, m) {
 }
 function banner() {
   console.log(`\n${C.violet}   ╭──────────────────────────────────────────────╮${C.r}`);
-  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.1${C.r}  ${C.dim}AURORA${C.r}     ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.2${C.r}  ${C.dim}AURORA+${C.r}    ${C.violet}│${C.r}`);
   console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · Asheo Systems${C.r}     ${C.violet}│${C.r}`);
   console.log(`${C.violet}   ╰──────────────────────────────────────────────╯${C.r}\n`);
 }
@@ -103,6 +103,89 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
 /* ═══════════════════════════════════════════════
+   ◈ PAYMENT RULES · 45 REGRAS EXTRAÍDAS
+   ═══════════════════════════════════════════════ */
+const RULES_VERSION = 33;
+const PAYMENT_RULES = [
+  { defaultId:"stripe.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Stripe", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)api\\.stripe\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/x-www-form-urlencoded", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"worldpay.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Worldpay", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:hpp|payments|secure)\\.worldpay\\.com(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"endurance.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Endurance", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)securepay\\.svcs\\.endurance\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"safecharge.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Safecharge", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)secure\\.safecharge\\.com(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"paddle.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Paddle", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)checkout-service\\.paddle\\.com\\/[^?#]*\\/pay(?:[?#]|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"adyen.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Adyen", patternEnc:{kind:"regex",source:"https:\\/\\/(?:checkoutshopper-live(?:-[a-z0-9]+)?\\.adyen\\.com|checkoutshopper-live(?:-[a-z0-9]+)?\\.cdn\\.adyen\\.com)\\/(?:checkoutshopper\\/)?v\\d+\\/(?:sessions\\/[^/]+\\/)?payments(?:\\/details)?(?:[/?#]|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"boosteroid.adyen", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Boosteroid Adyen", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)cloud\\.boosteroid\\.com\\/api\\/v2\\/payments\\/adyen\\/subscription\\/create(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"chess.adyen", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Chess.com Adyen", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)www\\.chess\\.com\\/payment\\/adyen\\/pay(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"gog.adyen", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"GOG Adyen", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)api\\.gog\\.com\\/v\\d+\\/checkout\\/[a-z0-9]+\\/payment(?:[/?#]|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"lootbar.adyen", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Lootbar", patternEnc:{kind:"regex",source:"api\\.lootbar\\.com\\/api\\/v2\\/asset\\/pay\\/adyen\\/card\\/request(?:[\\/?#]|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"xsolla.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Xsolla", patternEnc:{kind:"regex",source:"secure\\.xsolla\\.com\\/paystation2\\/api\\/.*$",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"recurly.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Recurly", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:[a-z0-9.-]+\\.)?recurly\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/x-www-form-urlencoded", requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"tebex.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Tebex", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)checkout\\.tebex\\.io(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"nordpayments.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"NordPayments", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)iframe-api\\.nordpayments\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:["primary_account_number","expiration_year","expiration_month","cvv"], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"grammerly.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Grammarly", patternEnc:{kind:"regex",source:"gr4vy\\.app|gateway\\.grammarly\\.com|payments\\.grammarly\\.com",flags:"i"}, matchContentType:"application/json", requiredKeys:["payment_method.number","payment_method.expiration_date","payment_method.security_code"], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"rizzup.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"RizzUp", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)rizzup\\.net(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"fortis.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Fortis", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)api\\.fortis\\.tech(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"jsbasistheory.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Basis Theory", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:api|js)\\.basistheory\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"braintree.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Braintree", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)payments\\.braintree-api\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"mercadopago.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"Mercado Pago", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:api|sdk)\\.mercadopago\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"xendit.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Xendit", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:api\\.xendit\\.co\\/v2\\/credit_card_tokens|pali-orchestrator-prod-live\\.xendit\\.co)(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"razorpay.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"Razorpay", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:api|checkout|cdn)\\.razorpay\\.com(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"paystack.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"Paystack", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:standard|api|checkout|js)\\.paystack\\.(?:co|com)(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"payu.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"PayU India", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:test|secure|info|uat-partner)\\.payu\\.in(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"epicgames.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"Epic Games", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)payment-website-pci\\.ol\\.epicgames\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"appsnetpk.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"IPG (apps.net.pk)", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)ipg\\d*\\.apps\\.net\\.pk(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"primer.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Primer", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)sdk\\.api\\.primer\\.io(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"bluesnap.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"BlueSnap", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:www1\\.)?bluesnap\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:["ccNumber"], inject:{"client_meta.app":"Asheo","client_meta.version":"1.0.0"}, removalFields:["debug","logs"], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"bridgerpay.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"BridgerPay", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)checkout\\.bridgerpay\\.com\\/api\\/(?:v2\\/deposit\\/credit-card|n\\/payment-details-cache)(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"spreedly.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Spreedly", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)core\\.spreedly\\.com\\/v1\\/payment_methods(\\/restricted\\.json)?",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"openpay.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Openpay", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:sandbox-)?api\\.openpay\\.(?:mx|co|pe|com)(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"nmi.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"NMI", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:secure\\.)?nmi\\.com\\/api\\/transact\\.php",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"nmi.collectjs", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"NMI CollectJS", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:secure\\.)?nmi\\.com\\/token\\/api\\/save_multipart_token(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"tailoredpay.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"TailoredPay", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)tailoredpay\\.transactiongateway\\.com\\/token\\/api\\/save_multipart_token(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"sagepay.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Opayo (Sage Pay)", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:live|test|pi-live|pi-test)\\.sagepay\\.com(?:\\/|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"viva.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Viva", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:demo-)?api\\.vivapayments\\.com\\/nativecheckout\\/v2\\/chargetokens",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"codapayments.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Codapayments", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:api-tc|tc-api-card-sandbox)\\.codapayments\\.com\\/v1\\/(?:pub\\/)?direct\\/charges",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"checkout.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Checkout.com", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:api\\.(?:sandbox\\.)?|card-acquisition-gateway\\.)checkout\\.com\\/tokens",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"airwallex.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Airwallex", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:[a-z0-9-]+\\.)*airwallex\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"tokenex.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"TokenEx", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)htp\\.tokenex\\.com\\/iframe\\/v3",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"cashfree.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"Cashfree", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:sandbox\\.|api\\.|sdk\\.|payments\\.)?cashfree\\.com\\/(?:checkout\\/api\\/checkouts\\/payments\\/?)?",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"zuora.default", defaultVersion:2, isDefault:true, swapCapable:true, enabled:true, name:"Zuora", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)rest\\.(?:[a-z0-9-]+\\.)*zuora\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"vgs.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"VGS", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:vgsapi\\.com|[a-z0-9-]+\\.(?:sandbox|live)\\.verygoodproxy\\.com)\\/cards(?:[/?#]|$)",flags:"i"}, matchContentType:null, requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"patreon.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Patreon", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)(?:www\\.)?patreon\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
+  { defaultId:"authorizenet.default", defaultVersion:1, isDefault:true, enabled:true, name:"Authorize.Net", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)api2\\.authorize\\.net\\/xml\\/v1\\/request\\.api",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"], swapCapable:false }
+];
+
+const GATEWAYS_META = [
+  {id:'default-stripe',name:'Stripe',pattern:'https://js.stripe.com/*',enabled:true,isDefault:true},
+  {id:'default-checkout',name:'Checkout.com',pattern:'https://*.checkout.com/*',enabled:true,isDefault:true},
+  {id:'default-adyen',name:'Adyen',pattern:'https://*.adyen.com/*',enabled:true,isDefault:true},
+  {id:'default-braintree',name:'Braintree',pattern:'https://*.braintreegateway.com/*',enabled:true,isDefault:true}
+];
+const CAMPAIGNS = [{id:'default-1',name:'Default Campaign',enabled:true,createdAt:new Date().toISOString()}];
+
+/* ═══════════════════════════════════════════════
+   ◈ GERADOR DE _PROV (JWT ES256)
+   ═══════════════════════════════════════════════ */
+const provCache = new Map();
+function generateProv(installId) {
+  if (!PRIVATE_KEY) return null;
+  if (!installId || typeof installId !== 'string') installId = 'default';
+  const cached = provCache.get(installId);
+  if (cached && (Date.now() - cached.ts) < 55 * 60 * 1000) return cached.prov;
+  try {
+    const prov = jwt.sign(
+      { sub: installId, jti: crypto.randomUUID(), iat: Math.floor(Date.now() / 1000) },
+      PRIVATE_KEY,
+      { algorithm: 'ES256', expiresIn: '1h' }
+    );
+    provCache.set(installId, { prov, ts: Date.now() });
+    return prov;
+  } catch (e) {
+    log('ERRO', 'generateProv: ' + e.message);
+    return null;
+  }
+}
+
+/* ═══════════════════════════════════════════════
    ◈ FEATURES / LIMITS / SCOPE
    ═══════════════════════════════════════════════ */
 const PREMIUM_FEATURES = {
@@ -126,7 +209,6 @@ const PREMIUM_CAPABILITIES = {
 const PREMIUM_LIMITS = { max_accounts:-1, daily_actions:-1, max_templates:-1, history_days:-1, export_limit:-1 };
 const FREE_LIMITS    = { max_accounts:1,  daily_actions:20, max_templates:3,  history_days:3,  export_limit:5 };
 const PREMIUM_SCOPE  = ['bypasser','cardfiller','cvv','premium','browserMods','persona','rules','gateways','exclusive'];
-
 const mapFeatures    = on => Object.fromEntries(Object.entries(PREMIUM_FEATURES).map(([k,v])=>[k,on?v.enabled:false]));
 const mapCapabilities= on => Object.fromEntries(Object.entries(PREMIUM_CAPABILITIES).map(([k,v])=>[k,on?v.enabled:false]));
 
@@ -136,11 +218,7 @@ const mapCapabilities= on => Object.fromEntries(Object.entries(PREMIUM_CAPABILIT
 function normalizeKey(k){ if(!k||typeof k!=='string')return ''; return k.trim().toUpperCase().replace(/\s+/g,'').replace(/[^A-Z0-9\-]/g,''); }
 async function redisSet(key, value) {
   const k = encodeURIComponent(normalizeKey(key));
-  const r = await fetch(`${UPSTASH_URL}/set/${k}`, {
-    method:'POST',
-    headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}`, 'Content-Type':'text/plain' },
-    body: typeof value === 'string' ? value : JSON.stringify(value)
-  });
+  const r = await fetch(`${UPSTASH_URL}/set/${k}`, { method:'POST', headers:{ Authorization:`Bearer ${UPSTASH_TOKEN}`, 'Content-Type':'text/plain' }, body: typeof value === 'string' ? value : JSON.stringify(value) });
   return r.json();
 }
 async function redisGet(key) {
@@ -179,7 +257,7 @@ const PACOTES = {
 const precoFmt = usd => `$${Number(usd).toFixed(2)}`;
 
 /* ═══════════════════════════════════════════════
-   ◈ MIGRAÇÃO — lifetime explícito, expiraEm preservado
+   ◈ MIGRAÇÃO
    ═══════════════════════════════════════════════ */
 function migrarLicenca(lic) {
   if (!lic || typeof lic !== 'object') return lic;
@@ -189,18 +267,12 @@ function migrarLicenca(lic) {
   const pk = PACOTES[n.plano];
   if (!n.planoNome) n.planoNome = pk ? pk.nome : 'Premium';
   if (typeof n.dias !== 'number') n.dias = pk ? pk.dias : 30;
-
   n.lifetime = n.plano === 'life';
   n.ilimitada = n.lifetime;
-
   if (!n.criadaEm && n.createdAt) n.criadaEm = n.createdAt;
   if (!n.criadaEm) n.criadaEm = Date.now();
-
-  // ⚡ v8.1 — SEMPRE recalcula se ausente OU se lifetime (fix para licenças antigas)
   if (!n.expiraEm || (typeof n.expiraEm !== 'number')) {
-    n.expiraEm = n.lifetime
-      ? n.criadaEm + (100 * 365 * 24 * 60 * 60 * 1000)
-      : n.criadaEm + (n.dias * 24 * 60 * 60 * 1000);
+    n.expiraEm = n.lifetime ? n.criadaEm + (100 * 365 * 24 * 60 * 60 * 1000) : n.criadaEm + (n.dias * 24 * 60 * 60 * 1000);
   }
   if (typeof n.ativa !== 'boolean') n.ativa = typeof n.active === 'boolean' ? n.active : true;
   if (typeof n.preco === 'string') n.preco = parseFloat(n.preco.replace(/[^\d.,]/g,'').replace(',','.')) || 0;
@@ -211,28 +283,19 @@ function migrarLicenca(lic) {
 }
 
 /* ═══════════════════════════════════════════════
-   ◈ JWT — exp baseado em expiraEm ORIGINAL
+   ◈ JWT
    ═══════════════════════════════════════════════ */
 function buildClaims(installId, lic) {
   const now = Math.floor(Date.now()/1000);
   const isLife = lic && lic.plano === 'life';
-
-  // ⚡ v8.1 — CRÍTICO: usa expiraEm ORIGINAL, não now+dias
-  // Isto garante que o token NUNCA é estendido por reativação.
-  const exp = isLife
-    ? now + (100 * 365 * 24 * 60 * 60)
-    : Math.floor((lic.expiraEm || (lic.criadaEm + lic.dias*86400000)) / 1000);
-
+  const exp = isLife ? now + (100 * 365 * 24 * 60 * 60) : Math.floor((lic.expiraEm || (lic.criadaEm + lic.dias*86400000)) / 1000);
   return {
     sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId,
     plan:'premium', planDisplayName:'Premium', tier:'premium', kind:'premium',
     status:'active', active:true, isPremium:true, isVerified:true,
     source:'premium', sourceType:'server', isFounder:true,
-    lifetime: isLife,
-    plano: lic.plano,
-    licenseKey: lic.chave,
-    issuedAt: lic.criadaEm,
-    expiresAt: lic.expiraEm,   // data real da chave (ms)
+    lifetime: isLife, plano: lic.plano, licenseKey: lic.chave,
+    issuedAt: lic.criadaEm, expiresAt: lic.expiraEm,
     scope: PREMIUM_SCOPE,
     features: mapFeatures(true), capabilities: mapCapabilities(true),
     limits:{...PREMIUM_LIMITS},
@@ -267,208 +330,75 @@ function validateBearer(req){
 }
 
 /* ═══════════════════════════════════════════════
-   ◈ GATEWAYS · RULES · CAMPAIGNS
-   ═══════════════════════════════════════════════ */
-const GATEWAYS=[
-  {id:'default-stripe',name:'Stripe',pattern:'https://js.stripe.com/*',enabled:true,isDefault:true},
-  {id:'default-checkout',name:'Checkout.com',pattern:'https://*.checkout.com/*',enabled:true,isDefault:true},
-  {id:'default-adyen',name:'Adyen',pattern:'https://*.adyen.com/*',enabled:true,isDefault:true},
-  {id:'default-braintree',name:'Braintree',pattern:'https://*.braintreegateway.com/*',enabled:true,isDefault:true}
-];
-const RULES=[
-  {id:'bypasser',name:'Bypasser',enabled:true,gateway:'*',priority:1},
-  {id:'cardfiller',name:'Card Filler',enabled:true,gateway:'*',priority:2},
-  {id:'cvv',name:'CVV Handler',enabled:true,gateway:'*',priority:3},
-  {id:'premium',name:'Premium Rules',enabled:true,gateway:'*',priority:10}
-];
-const CAMPAIGNS=[{id:'default-1',name:'Default Campaign',enabled:true,createdAt:new Date().toISOString()}];
-
-/* ═══════════════════════════════════════════════
-   ◈ I18N — Tradução TOTAL
+   ◈ I18N
    ═══════════════════════════════════════════════ */
 const T = {
   pt: {
-    // Menu principal
-    menu_title:'⌬  PAINEL DE CONTROLE',
-    menu_sub:'Selecione uma operação abaixo',
+    menu_title:'⌬  PAINEL DE CONTROLE', menu_sub:'Selecione uma operação abaixo',
     online:'online', secure:'seguro',
-    // Botões do menu
-    btn_generate:'⚡  Gerar Licença',
-    btn_mykeys:'◈  Minhas Chaves',
-    btn_stats:'◧  Estatísticas',
-    btn_link:'⟡  Vincular',
-    btn_unlink:'⌬  Desvincular',
-    btn_query:'◉  Consultar',
-    btn_prices:'✦  Tabela de Preços',
-    btn_support:'✆  Suporte',
-    btn_lang:'◐  Idioma / Language',
-    btn_help:'?  Ajuda',
-    btn_danger:'⚠  Zona de Perigo',
-    btn_back:'‹  Voltar',
-    btn_menu:'‹  Menu',
-    btn_refresh:'↻  Atualizar',
-    btn_cancel:'✕  Cancelar',
-    btn_confirm_yes:'✓  Sim, confirmar',
-    btn_confirm_no:'✕  Cancelar',
-    // Welcome (não-owner)
-    welcome_title:'Bem-vindo ao Mozlince Nebula',
-    welcome_desc:'Para adquirir uma licença premium, clique abaixo:',
+    btn_generate:'⚡  Gerar Licença', btn_mykeys:'◈  Minhas Chaves', btn_stats:'◧  Estatísticas',
+    btn_link:'⟡  Vincular', btn_unlink:'⌬  Desvincular', btn_query:'◉  Consultar',
+    btn_prices:'✦  Tabela de Preços', btn_support:'✆  Suporte', btn_lang:'◐  Idioma / Language',
+    btn_help:'?  Ajuda', btn_danger:'⚠  Zona de Perigo', btn_back:'‹  Voltar', btn_menu:'‹  Menu',
+    btn_refresh:'↻  Atualizar', btn_cancel:'✕  Cancelar', btn_confirm_yes:'✓  Sim, confirmar', btn_confirm_no:'✕  Cancelar',
+    welcome_title:'Bem-vindo ao Mozlince Nebula', welcome_desc:'Para adquirir uma licença premium, clique abaixo:',
     contact:'✆  CONTACTAR SUPORTE',
-    // Suporte
-    support_title:'✆  Suporte',
-    support_write:'Escreva sua mensagem agora:',
-    support_hint:'(o próximo texto será encaminhado ao suporte)',
-    support_exp:'Sessão expira em 10 minutos',
-    support_sent:'✓  MENSAGEM ENVIADA',
-    support_sent_desc:'Sua mensagem foi encaminhada.\nTempo de resposta: até 24h',
-    support_cancelled:'✕  Suporte cancelado',
-    // Gerar
-    gen_title:'⚡  Gerar Licença',
-    gen_sub:'Escolha um plano abaixo:',
-    gen_success:'✓  LICENÇA EMITIDA',
-    gen_key:'Chave',
-    gen_plan:'Plano',
-    gen_price:'Preço',
-    gen_issued:'Emitida',
-    gen_expires:'Expira',
-    gen_duration:'Duração',
-    gen_lifetime:'Lifetime',
-    gen_never:'Nunca',
-    gen_yes:'Sim',
-    gen_no:'Não',
-    // Listar
-    list_title:'◈  Minhas Licenças',
-    list_empty:'Nenhuma licença cadastrada.',
-    list_more:'+{n} ocultas',
-    // Stats
-    stats_title:'◧  Estatísticas',
-    stats_total:'Total',
-    stats_active:'Ativas',
-    stats_expired:'Expiradas',
-    stats_linked:'Vinculadas',
-    stats_lifetime:'Lifetime',
-    stats_revenue:'Receita',
-    stats_rate:'Taxa ativa',
-    // Detalhes
-    detail_title:'◉  Detalhes da Licença',
-    detail_key:'Chave',
-    detail_status:'Status',
-    detail_active:'● Ativa',
-    detail_revoked:'○ Revogada',
-    detail_install:'Install ID',
-    detail_not_linked:'não vinculada',
-    detail_remaining:'Restante',
-    // Ações
-    act_link:'⟡ Vincular',
-    act_unlink:'⌬ Desvincular',
-    act_revoke:'✕ Revogar',
-    act_delete:'✕ Deletar',
-    // Preços
-    prices_title:'✦  Tabela de Preços',
-    prices_currency:'USD (Dólar Americano)',
-    // Ajuda
-    help_title:'?  Central de Ajuda',
-    help_cmds:'Comandos disponíveis',
-    // Perigo
-    danger_title:'⚠  Zona de Perigo',
-    danger_warn:'Ações irreversíveis',
-    danger_del_active:'Deletar apenas ativas',
-    danger_del_all:'Deletar TODAS as licenças',
+    support_title:'✆  Suporte', support_write:'Escreva sua mensagem agora:', support_hint:'(o próximo texto será encaminhado ao suporte)',
+    support_exp:'Sessão expira em 10 minutos', support_sent:'✓  MENSAGEM ENVIADA',
+    support_sent_desc:'Sua mensagem foi encaminhada.\nTempo de resposta: até 24h', support_cancelled:'✕  Suporte cancelado',
+    gen_title:'⚡  Gerar Licença', gen_sub:'Escolha um plano abaixo:', gen_success:'✓  LICENÇA EMITIDA',
+    gen_key:'Chave', gen_plan:'Plano', gen_price:'Preço', gen_issued:'Emitida', gen_expires:'Expira',
+    gen_duration:'Duração', gen_lifetime:'Lifetime', gen_never:'Nunca', gen_yes:'Sim', gen_no:'Não',
+    list_title:'◈  Minhas Licenças', list_empty:'Nenhuma licença cadastrada.', list_more:'+{n} ocultas',
+    stats_title:'◧  Estatísticas', stats_total:'Total', stats_active:'Ativas', stats_expired:'Expiradas',
+    stats_linked:'Vinculadas', stats_lifetime:'Lifetime', stats_revenue:'Receita', stats_rate:'Taxa ativa',
+    detail_title:'◉  Detalhes da Licença', detail_key:'Chave', detail_status:'Status',
+    detail_active:'● Ativa', detail_revoked:'○ Revogada', detail_install:'Install ID',
+    detail_not_linked:'não vinculada', detail_remaining:'Restante',
+    act_link:'⟡ Vincular', act_unlink:'⌬ Desvincular', act_revoke:'✕ Revogar', act_delete:'✕ Deletar',
+    prices_title:'✦  Tabela de Preços', prices_currency:'USD (Dólar Americano)',
+    help_title:'?  Central de Ajuda', help_cmds:'Comandos disponíveis',
+    danger_title:'⚠  Zona de Perigo', danger_warn:'Ações irreversíveis',
+    danger_del_active:'Deletar apenas ativas', danger_del_all:'Deletar TODAS as licenças',
     danger_confirm_active:'Deletar todas as licenças <b>ativas</b>?',
     danger_confirm_all:'⚠ DELETAR TODAS as licenças? Esta ação é irreversível.',
     danger_done:'{n} licenças removidas.',
-    // Lang
-    lang_select:'Escolha seu idioma / Choose your language:',
-    lang_saved:'✓ Idioma atualizado',
-    // Estado
-    status_active:'● Ativa',
-    status_revoked:'○ Revogada',
-    status_expired:'✕ Expirada',
+    lang_select:'Escolha seu idioma / Choose your language:', lang_saved:'✓ Idioma atualizado',
+    status_active:'● Ativa', status_revoked:'○ Revogada', status_expired:'✕ Expirada',
     expired_msg:'Esta licença expirou. Renove para continuar.'
   },
   en: {
-    menu_title:'⌬  CONTROL PANEL',
-    menu_sub:'Select an operation below',
+    menu_title:'⌬  CONTROL PANEL', menu_sub:'Select an operation below',
     online:'online', secure:'secure',
-    btn_generate:'⚡  Generate License',
-    btn_mykeys:'◈  My Keys',
-    btn_stats:'◧  Statistics',
-    btn_link:'⟡  Link',
-    btn_unlink:'⌬  Unlink',
-    btn_query:'◉  Query',
-    btn_prices:'✦  Price List',
-    btn_support:'✆  Support',
-    btn_lang:'◐  Language / Idioma',
-    btn_help:'?  Help',
-    btn_danger:'⚠  Danger Zone',
-    btn_back:'‹  Back',
-    btn_menu:'‹  Menu',
-    btn_refresh:'↻  Refresh',
-    btn_cancel:'✕  Cancel',
-    btn_confirm_yes:'✓  Yes, confirm',
-    btn_confirm_no:'✕  Cancel',
-    welcome_title:'Welcome to Mozlince Nebula',
-    welcome_desc:'To purchase a premium license, click below:',
+    btn_generate:'⚡  Generate License', btn_mykeys:'◈  My Keys', btn_stats:'◧  Statistics',
+    btn_link:'⟡  Link', btn_unlink:'⌬  Unlink', btn_query:'◉  Query',
+    btn_prices:'✦  Price List', btn_support:'✆  Support', btn_lang:'◐  Language / Idioma',
+    btn_help:'?  Help', btn_danger:'⚠  Danger Zone', btn_back:'‹  Back', btn_menu:'‹  Menu',
+    btn_refresh:'↻  Refresh', btn_cancel:'✕  Cancel', btn_confirm_yes:'✓  Yes, confirm', btn_confirm_no:'✕  Cancel',
+    welcome_title:'Welcome to Mozlince Nebula', welcome_desc:'To purchase a premium license, click below:',
     contact:'✆  CONTACT SUPPORT',
-    support_title:'✆  Support',
-    support_write:'Write your message now:',
-    support_hint:'(the next text will be forwarded to support)',
-    support_exp:'Session expires in 10 minutes',
-    support_sent:'✓  MESSAGE SENT',
-    support_sent_desc:'Your message was forwarded.\nResponse time: up to 24h',
-    support_cancelled:'✕  Support cancelled',
-    gen_title:'⚡  Generate License',
-    gen_sub:'Choose a plan below:',
-    gen_success:'✓  LICENSE ISSUED',
-    gen_key:'Key',
-    gen_plan:'Plan',
-    gen_price:'Price',
-    gen_issued:'Issued',
-    gen_expires:'Expires',
-    gen_duration:'Duration',
-    gen_lifetime:'Lifetime',
-    gen_never:'Never',
-    gen_yes:'Yes',
-    gen_no:'No',
-    list_title:'◈  My Licenses',
-    list_empty:'No licenses found.',
-    list_more:'+{n} hidden',
-    stats_title:'◧  Statistics',
-    stats_total:'Total',
-    stats_active:'Active',
-    stats_expired:'Expired',
-    stats_linked:'Linked',
-    stats_lifetime:'Lifetime',
-    stats_revenue:'Revenue',
-    stats_rate:'Active rate',
-    detail_title:'◉  License Details',
-    detail_key:'Key',
-    detail_status:'Status',
-    detail_active:'● Active',
-    detail_revoked:'○ Revoked',
-    detail_install:'Install ID',
-    detail_not_linked:'not linked',
-    detail_remaining:'Remaining',
-    act_link:'⟡ Link',
-    act_unlink:'⌬ Unlink',
-    act_revoke:'✕ Revoke',
-    act_delete:'✕ Delete',
-    prices_title:'✦  Price List',
-    prices_currency:'USD (US Dollar)',
-    help_title:'?  Help Center',
-    help_cmds:'Available commands',
-    danger_title:'⚠  Danger Zone',
-    danger_warn:'Irreversible actions',
-    danger_del_active:'Delete active only',
-    danger_del_all:'Delete ALL licenses',
+    support_title:'✆  Support', support_write:'Write your message now:', support_hint:'(the next text will be forwarded to support)',
+    support_exp:'Session expires in 10 minutes', support_sent:'✓  MESSAGE SENT',
+    support_sent_desc:'Your message was forwarded.\nResponse time: up to 24h', support_cancelled:'✕  Support cancelled',
+    gen_title:'⚡  Generate License', gen_sub:'Choose a plan below:', gen_success:'✓  LICENSE ISSUED',
+    gen_key:'Key', gen_plan:'Plan', gen_price:'Price', gen_issued:'Issued', gen_expires:'Expires',
+    gen_duration:'Duration', gen_lifetime:'Lifetime', gen_never:'Never', gen_yes:'Yes', gen_no:'No',
+    list_title:'◈  My Licenses', list_empty:'No licenses found.', list_more:'+{n} hidden',
+    stats_title:'◧  Statistics', stats_total:'Total', stats_active:'Active', stats_expired:'Expired',
+    stats_linked:'Linked', stats_lifetime:'Lifetime', stats_revenue:'Revenue', stats_rate:'Active rate',
+    detail_title:'◉  License Details', detail_key:'Key', detail_status:'Status',
+    detail_active:'● Active', detail_revoked:'○ Revoked', detail_install:'Install ID',
+    detail_not_linked:'not linked', detail_remaining:'Remaining',
+    act_link:'⟡ Link', act_unlink:'⌬ Unlink', act_revoke:'✕ Revoke', act_delete:'✕ Delete',
+    prices_title:'✦  Price List', prices_currency:'USD (US Dollar)',
+    help_title:'?  Help Center', help_cmds:'Available commands',
+    danger_title:'⚠  Danger Zone', danger_warn:'Irreversible actions',
+    danger_del_active:'Delete active only', danger_del_all:'Delete ALL licenses',
     danger_confirm_active:'Delete all <b>active</b> licenses?',
     danger_confirm_all:'⚠ DELETE ALL licenses? This action is irreversible.',
     danger_done:'{n} licenses removed.',
-    lang_select:'Choose your language / Escolha seu idioma:',
-    lang_saved:'✓ Language updated',
-    status_active:'● Active',
-    status_revoked:'○ Revoked',
-    status_expired:'✕ Expired',
+    lang_select:'Choose your language / Escolha seu idioma:', lang_saved:'✓ Language updated',
+    status_active:'● Active', status_revoked:'○ Revoked', status_expired:'✕ Expired',
     expired_msg:'This license expired. Renew to continue.'
   }
 };
@@ -479,66 +409,37 @@ function t(lang, key, vars={}) {
 }
 
 /* ═══════════════════════════════════════════════
-   ◈ TELEGRAM · SESSÕES
+   ◈ TELEGRAM
    ═══════════════════════════════════════════════ */
 const SUPPORT_SESSIONS = new Map();
 const USER_LANG = new Map();
-setInterval(() => {
-  const now = Date.now();
-  for (const [k,v] of SUPPORT_SESSIONS.entries()) if (now - v.ts > 10*60*1000) SUPPORT_SESSIONS.delete(k);
-}, 60000);
-
+setInterval(() => { const now = Date.now(); for (const [k,v] of SUPPORT_SESSIONS.entries()) if (now - v.ts > 10*60*1000) SUPPORT_SESSIONS.delete(k); }, 60000);
 const TG_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 async function tgSend(chatId, text, keyboard=null) {
-  try {
-    const body={chat_id:chatId,text,parse_mode:'HTML',disable_web_page_preview:true};
-    if(keyboard)body.reply_markup=keyboard;
-    await fetch(`${TG_API}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  } catch(e){ log('TG','send erro: '+e.message); }
+  try { const body={chat_id:chatId,text,parse_mode:'HTML',disable_web_page_preview:true}; if(keyboard)body.reply_markup=keyboard; await fetch(`${TG_API}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); } catch(e){ log('TG','send erro: '+e.message); }
 }
 async function tgEdit(chatId, messageId, text, keyboard=null) {
-  try {
-    const body={chat_id:chatId,message_id:messageId,text,parse_mode:'HTML',disable_web_page_preview:true};
-    if(keyboard)body.reply_markup=keyboard;
-    await fetch(`${TG_API}/editMessageText`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  } catch(e){ log('TG','edit erro: '+e.message); }
+  try { const body={chat_id:chatId,message_id:messageId,text,parse_mode:'HTML',disable_web_page_preview:true}; if(keyboard)body.reply_markup=keyboard; await fetch(`${TG_API}/editMessageText`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); } catch(e){ log('TG','edit erro: '+e.message); }
 }
 async function tgAnswer(id, text='') {
   try { await fetch(`${TG_API}/answerCallbackQuery`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({callback_query_id:id,text})}); } catch {}
 }
-
-/* ── Layout helpers ── */
 const UI = {
   header: (lang='pt') => {
     const subtitle = lang === 'en' ? 'Premium License Engine' : 'Motor de Licenças Premium';
     return `<b>⌬ ───────────────────── ⌬</b>\n` +
-           `<b>◈  MOZLINCE NEBULA  v8.1</b>\n` +
+           `<b>◈  MOZLINCE NEBULA  v8.2</b>\n` +
            `<i>${subtitle} · Asheo Systems</i>\n` +
            `<b>⌬ ───────────────────── ⌬</b>`;
   },
   sep: '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
-  card: (title, body) =>
-    `<b>◈ ──『 ${title} 』── ◈</b>\n` +
-    `<code>${UI.sep}</code>\n` +
-    body,
   kv: (icon, label, value) => `<b>${icon}</b>  <b>${label}:</b>  ${value}`
 };
 
-/* ═══════════════════════════════════════════════
-   ◈ MENU PRINCIPAL (TRADUZIDO)
-   ═══════════════════════════════════════════════ */
 function menuPrincipal(lang='pt') {
   const hora = new Date().toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' });
   return {
-    texto:
-`${UI.header(lang)}
-
-<b>${t(lang,'menu_title')}</b>
-<code>${UI.sep}</code>
-<b>◔</b> ${hora}   <b>◉</b> ${t(lang,'online')}   <b>⟡</b> ${t(lang,'secure')} ES256
-<code>${UI.sep}</code>
-
-<i>${t(lang,'menu_sub')}</i>`,
+    texto: `${UI.header(lang)}\n\n<b>${t(lang,'menu_title')}</b>\n<code>${UI.sep}</code>\n<b>◔</b> ${hora}   <b>◉</b> ${t(lang,'online')}   <b>⟡</b> ${t(lang,'secure')} ES256\n<code>${UI.sep}</code>\n\n<i>${t(lang,'menu_sub')}</i>`,
     teclado: { inline_keyboard: [
       [{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }],
       [{ text: t(lang,'btn_mykeys'), callback_data:'m_listar' }, { text: t(lang,'btn_stats'), callback_data:'m_stats' }],
@@ -559,15 +460,11 @@ async function cmdStart(chatId, msgId=null) {
   else await tgSend(chatId, m.texto, m.teclado);
 }
 
-/* ═══════════════════════════════════════════════
-   ◈ CALLBACK HANDLER
-   ═══════════════════════════════════════════════ */
 async function handleCallback(cb) {
   const chatId = cb.message.chat.id, msgId = cb.message.message_id, data = cb.data, userId = String(cb.from.id);
   const isOwner = userId === String(OWNER_ID);
   const lang = USER_LANG.get(String(chatId)) || 'pt';
 
-  /* ── Idioma ── */
   if (data === 'm_lang') {
     await tgAnswer(cb.id);
     const texto = `${UI.header(lang)}\n\n<b>◐  ${t(lang,'lang_select')}</b>\n<code>${UI.sep}</code>`;
@@ -587,57 +484,30 @@ async function handleCallback(cb) {
     return;
   }
 
-  /* ── Não-owner ── */
   if (!isOwner) {
     if (data === 'm_contacto') {
       SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() });
       await tgAnswer(cb.id, '✎');
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'support_title')}</b>
-<code>${UI.sep}</code>
-
-<b>✎</b> ${t(lang,'support_write')}
-<i>${t(lang,'support_hint')}</i>
-
-<code>${UI.sep}</code>
-<b>◔</b> ${t(lang,'support_exp')}`,
-        { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] });
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'support_title')}</b>\n<code>${UI.sep}</code>\n\n<b>✎</b> ${t(lang,'support_write')}\n<i>${t(lang,'support_hint')}</i>\n\n<code>${UI.sep}</code>\n<b>◔</b> ${t(lang,'support_exp')}`, { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] });
       return;
     }
     if (data === 'm_cancelar_suporte') {
       SUPPORT_SESSIONS.delete(String(chatId));
       await tgAnswer(cb.id, '✕');
-      await tgEdit(chatId, msgId,
-`<b>${t(lang,'support_cancelled')}</b>\n\n<i>${t(lang,'welcome_desc')}</i>`,
-        { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }]] });
+      await tgEdit(chatId, msgId, `<b>${t(lang,'support_cancelled')}</b>\n\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }]] });
       return;
     }
     if (data === 'm_home') {
       await tgAnswer(cb.id);
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>◈  ${t(lang,'welcome_title')}</b>
-<code>${UI.sep}</code>
-
-<i>${t(lang,'welcome_desc')}</i>`,
-        { inline_keyboard: [
-          [{ text: t(lang,'contact'), callback_data:'m_contacto' }],
-          [{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]
-        ]});
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>◈  ${t(lang,'welcome_title')}</b>\n<code>${UI.sep}</code>\n\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]] });
       return;
     }
     await tgAnswer(cb.id, '⛔');
     return;
   }
 
-  /* ═══════ OWNER ═══════ */
   try {
     if (data === 'm_home') { await tgAnswer(cb.id); return cmdStart(chatId, msgId); }
-
-    /* ── GERAR ── */
     if (data === 'm_gerar') {
       await tgAnswer(cb.id, '⚡');
       const kb = { inline_keyboard: [] };
@@ -648,84 +518,29 @@ async function handleCallback(cb) {
         kb.inline_keyboard.push(linha);
       }
       kb.inline_keyboard.push([{ text: t(lang,'btn_back'), callback_data:'m_home' }]);
-
       let tabela = '';
-      for (const [,p] of Object.entries(PACOTES)) {
-        const dur = p.lifetime ? '∞' : `${p.dias}d`;
-        tabela += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>  <i>${dur}</i>\n`;
-      }
-
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'gen_title')}</b>
-<code>${UI.sep}</code>
-<i>${t(lang,'gen_sub')}</i>
-
-${tabela}
-<code>${UI.sep}</code>`,
-        kb);
+      for (const [,p] of Object.entries(PACOTES)) { const dur = p.lifetime ? '∞' : `${p.dias}d`; tabela += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>  <i>${dur}</i>\n`; }
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'gen_title')}</b>\n<code>${UI.sep}</code>\n<i>${t(lang,'gen_sub')}</i>\n\n${tabela}\n<code>${UI.sep}</code>`, kb);
       return;
     }
-
-    /* ── Gerar chave ── */
     if (data.startsWith('g_')) {
       const pk = data.substring(2), p = PACOTES[pk];
       if (!p) { await tgAnswer(cb.id, '✕'); return; }
       const chave = generateLicenseKey();
       const agora = Date.now();
       const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
-      await redisSet(chave, JSON.stringify({
-        chave, plano: pk, planoNome: p.nome,
-        preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco),
-        dias: p.dias,
-        lifetime: p.lifetime === true,
-        ilimitada: p.lifetime === true,
-        criadaEm: agora, expiraEm: expira,
-        ativa: true, installId: null, ativadaEm: null,
-        v: 8
-      }));
+      await redisSet(chave, JSON.stringify({ chave, plano: pk, planoNome: p.nome, preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco), dias: p.dias, lifetime: p.lifetime === true, ilimitada: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, installId: null, ativadaEm: null, v: 8 }));
       log('OK', `Chave ${pk} gerada: ${chave}`);
       await tgAnswer(cb.id, '✓');
-
       const restaTxt = p.lifetime ? '∞  LIFETIME' : humanTime(p.dias*24*60*60*1000);
       const barra = p.lifetime ? '▰▰▰▰▰▰▰▰▰▰' : progressBar(100);
-
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'gen_success')}</b>
-<code>${UI.sep}</code>
-
-<b>⌬  ${t(lang,'gen_key')}</b>
-<code>${chave}</code>
-
-<code>${UI.sep}</code>
-${UI.kv(p.emoji, t(lang,'gen_plan'), `<b>${p.nome}</b>`)}
-${UI.kv('◆', t(lang,'gen_price'), `<code>${precoFmt(p.preco)}</code>`)}
-${UI.kv('◔', t(lang,'gen_issued'), formatDate(agora))}
-${UI.kv('◕', t(lang,'gen_expires'), p.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(expira))}
-${UI.kv('⟡', t(lang,'gen_duration'), `<b>${restaTxt}</b>`)}
-${UI.kv('∞', t(lang,'gen_lifetime'), p.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`)}
-<code>${UI.sep}</code>
-<code>${barra}</code>`,
-        { inline_keyboard: [
-          [{ text: t(lang,'btn_query'), callback_data:`c_${chave}` }],
-          [{ text: t(lang,'btn_menu'), callback_data:'m_home' }]
-        ]});
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'gen_success')}</b>\n<code>${UI.sep}</code>\n\n<b>⌬  ${t(lang,'gen_key')}</b>\n<code>${chave}</code>\n\n<code>${UI.sep}</code>\n${UI.kv(p.emoji, t(lang,'gen_plan'), `<b>${p.nome}</b>`)}\n${UI.kv('◆', t(lang,'gen_price'), `<code>${precoFmt(p.preco)}</code>`)}\n${UI.kv('◔', t(lang,'gen_issued'), formatDate(agora))}\n${UI.kv('◕', t(lang,'gen_expires'), p.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(expira))}\n${UI.kv('⟡', t(lang,'gen_duration'), `<b>${restaTxt}</b>`)}\n${UI.kv('∞', t(lang,'gen_lifetime'), p.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`)}\n<code>${UI.sep}</code>\n<code>${barra}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_query'), callback_data:`c_${chave}` }],[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
       return;
     }
-
-    /* ── LISTAR ── */
     if (data === 'm_listar') {
       await tgAnswer(cb.id, '◈');
       const keys = await redisKeys('ASHEO-*');
-      if (keys.length === 0) {
-        await tgEdit(chatId, msgId,
-`${UI.header(lang)}\n\n<b>${t(lang,'list_title')}</b>\n<code>${UI.sep}</code>\n<i>${t(lang,'list_empty')}</i>`,
-          { inline_keyboard: [[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] });
-        return;
-      }
+      if (keys.length === 0) { await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'list_title')}</b>\n<code>${UI.sep}</code>\n<i>${t(lang,'list_empty')}</i>`, { inline_keyboard: [[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); return; }
       let txt = `<b>${t(lang,'list_title')}</b>  <code>(${keys.length})</code>\n<code>${UI.sep}</code>\n\n`;
       const inlineKb = [];
       for (let i = 0; i < Math.min(keys.length, 15); i++) {
@@ -740,167 +555,57 @@ ${UI.kv('∞', t(lang,'gen_lifetime'), p.lifetime ? `✓ ${t(lang,'gen_yes')}` :
       await tgEdit(chatId, msgId, txt, { inline_keyboard: inlineKb });
       return;
     }
-
-    /* ── STATS ── */
     if (data === 'm_stats') {
       await tgAnswer(cb.id, '◧');
       const keys = await redisKeys('ASHEO-*');
       let ativas=0, expiradas=0, vinc=0, life=0, receita=0;
-      for (const k of keys) {
-        const l = await redisGet(k); if (!l) continue;
-        if (l.ativa) ativas++;
-        if (!l.lifetime && l.expiraEm < Date.now()) expiradas++;
-        if (l.installId) vinc++;
-        if (l.lifetime) life++;
-        if (l.preco) receita += Number(l.preco) || 0;
-      }
+      for (const k of keys) { const l = await redisGet(k); if (!l) continue; if (l.ativa) ativas++; if (!l.lifetime && l.expiraEm < Date.now()) expiradas++; if (l.installId) vinc++; if (l.lifetime) life++; if (l.preco) receita += Number(l.preco) || 0; }
       const taxa = keys.length ? Math.round((ativas/keys.length)*100) : 0;
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'stats_title')}</b>
-<code>${UI.sep}</code>
-
-${UI.kv('◈', t(lang,'stats_total'),    `<code>${keys.length}</code>`)}
-${UI.kv('●', t(lang,'stats_active'),   `<code>${ativas}</code>`)}
-${UI.kv('○', t(lang,'stats_expired'),  `<code>${expiradas}</code>`)}
-${UI.kv('⟡', t(lang,'stats_linked'),   `<code>${vinc}</code>`)}
-${UI.kv('∞', t(lang,'stats_lifetime'), `<code>${life}</code>`)}
-
-<code>${UI.sep}</code>
-${UI.kv('◆', t(lang,'stats_revenue'), `<code>${precoFmt(receita)}</code>`)}
-${UI.kv('◔', t(lang,'stats_rate'),    `<b>${taxa}%</b>`)}
-<code>${progressBar(taxa, 15)}</code>`,
-        { inline_keyboard: [
-          [{ text: t(lang,'btn_refresh'), callback_data:'m_stats' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]
-        ]});
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'stats_title')}</b>\n<code>${UI.sep}</code>\n\n${UI.kv('◈', t(lang,'stats_total'), `<code>${keys.length}</code>`)}\n${UI.kv('●', t(lang,'stats_active'), `<code>${ativas}</code>`)}\n${UI.kv('○', t(lang,'stats_expired'), `<code>${expiradas}</code>`)}\n${UI.kv('⟡', t(lang,'stats_linked'), `<code>${vinc}</code>`)}\n${UI.kv('∞', t(lang,'stats_lifetime'), `<code>${life}</code>`)}\n\n<code>${UI.sep}</code>\n${UI.kv('◆', t(lang,'stats_revenue'), `<code>${precoFmt(receita)}</code>`)}\n${UI.kv('◔', t(lang,'stats_rate'), `<b>${taxa}%</b>`)}\n<code>${progressBar(taxa, 15)}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_refresh'), callback_data:'m_stats' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]] });
       return;
     }
-
-    /* ── VINC / DESVINC / CONSULTAR ── */
-    if (data === 'm_vincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `${UI.header(lang)}\n\n<b>${t(lang,'act_link')}</b>\n<code>${UI.sep}</code>\n<code>/activate &lt;installId&gt; &lt;chave&gt;</code>`,
-      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
-    if (data === 'm_desvincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `${UI.header(lang)}\n\n<b>${t(lang,'act_unlink')}</b>\n<code>${UI.sep}</code>\n<code>/desvincular &lt;chave&gt;</code>`,
-      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
-    if (data === 'm_consultar') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `${UI.header(lang)}\n\n<b>${t(lang,'btn_query')}</b>\n<code>${UI.sep}</code>\n<code>/status &lt;chave&gt;</code>`,
-      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
-
-    /* ── PREÇOS ── */
+    if (data === 'm_vincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'act_link')}</b>\n<code>${UI.sep}</code>\n<code>/activate &lt;installId&gt; &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
+    if (data === 'm_desvincular') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'act_unlink')}</b>\n<code>${UI.sep}</code>\n<code>/desvincular &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
+    if (data === 'm_consultar') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'btn_query')}</b>\n<code>${UI.sep}</code>\n<code>/status &lt;chave&gt;</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] }); }
     if (data === 'm_precos') {
       await tgAnswer(cb.id);
       let txt = `${UI.header(lang)}\n\n<b>${t(lang,'prices_title')}</b>\n<code>${UI.sep}</code>\n\n`;
-      for (const [,p] of Object.entries(PACOTES)) {
-        const dur = p.lifetime ? '∞' : `${p.dias} dias`;
-        txt += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>\n      <i>${dur}</i>\n`;
-      }
+      for (const [,p] of Object.entries(PACOTES)) { const dur = p.lifetime ? '∞' : `${p.dias} dias`; txt += `<b>${p.emoji}</b>  ${p.nome.padEnd(11)}  <code>${precoFmt(p.preco)}</code>\n      <i>${dur}</i>\n`; }
       txt += `\n<code>${UI.sep}</code>\n<i>◆ ${t(lang,'prices_currency')}</i>`;
-      await tgEdit(chatId, msgId, txt, { inline_keyboard: [
-        [{ text: t(lang,'btn_support'), callback_data:'m_contacto' }],
-        [{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]
-      ]});
+      await tgEdit(chatId, msgId, txt, { inline_keyboard: [[{ text: t(lang,'btn_support'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_generate'), callback_data:'m_gerar' }, { text: t(lang,'btn_back'), callback_data:'m_home' }]] });
       return;
     }
-
-    /* ── SUPORTE ── */
     if (data === 'm_contacto') {
       await tgAnswer(cb.id, '✆');
       SUPPORT_SESSIONS.set(String(chatId), { step:'waiting', ts: Date.now() });
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'support_title')}</b>
-<code>${UI.sep}</code>
-
-<b>✎</b> ${t(lang,'support_write')}
-<i>${t(lang,'support_hint')}</i>
-
-<code>${UI.sep}</code>
-<b>◔</b> ${t(lang,'support_exp')}`,
-        { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] });
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'support_title')}</b>\n<code>${UI.sep}</code>\n\n<b>✎</b> ${t(lang,'support_write')}\n<i>${t(lang,'support_hint')}</i>\n\n<code>${UI.sep}</code>\n<b>◔</b> ${t(lang,'support_exp')}`, { inline_keyboard: [[{ text: t(lang,'btn_cancel'), callback_data:'m_cancelar_suporte' }]] });
       return;
     }
-    if (data === 'm_cancelar_suporte') {
-      SUPPORT_SESSIONS.delete(String(chatId));
-      await tgAnswer(cb.id, '✕');
-      return cmdStart(chatId, msgId);
-    }
-
-    /* ── AJUDA ── */
+    if (data === 'm_cancelar_suporte') { SUPPORT_SESSIONS.delete(String(chatId)); await tgAnswer(cb.id, '✕'); return cmdStart(chatId, msgId); }
     if (data === 'm_ajuda') {
       await tgAnswer(cb.id);
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'help_title')}</b>
-<code>${UI.sep}</code>
-<b>${t(lang,'help_cmds')}:</b>
-
-<code>/start</code>           Menu
-<code>/gerar</code>           Gerar
-<code>/listar</code>          Listar
-<code>/stats</code>           Estatísticas
-<code>/status &lt;k&gt;</code>      Consultar
-<code>/activate &lt;i&gt; &lt;k&gt;</code>  Vincular
-<code>/desvincular &lt;k&gt;</code> Desvincular
-<code>/revogar &lt;k&gt;</code>    Revogar
-<code>/deletar &lt;k&gt;</code>    Deletar uma
-<code>/deletartudo</code>     Deletar TUDO
-<code>/resp &lt;id&gt; &lt;msg&gt;</code> Responder
-<code>/lang</code>            Idioma
-
-<code>${UI.sep}</code>`,
-        { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] });
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'help_title')}</b>\n<code>${UI.sep}</code>\n<b>${t(lang,'help_cmds')}:</b>\n\n<code>/start</code>           Menu\n<code>/gerar</code>           Gerar\n<code>/listar</code>          Listar\n<code>/stats</code>           Estatísticas\n<code>/status &lt;k&gt;</code>      Consultar\n<code>/activate &lt;i&gt; &lt;k&gt;</code>  Vincular\n<code>/desvincular &lt;k&gt;</code> Desvincular\n<code>/revogar &lt;k&gt;</code>    Revogar\n<code>/deletar &lt;k&gt;</code>    Deletar uma\n<code>/deletartudo</code>     Deletar TUDO\n<code>/resp &lt;id&gt; &lt;msg&gt;</code> Responder\n<code>/lang</code>            Idioma\n\n<code>${UI.sep}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] });
       return;
     }
-
-    /* ── PERIGO ── */
     if (data === 'm_perigo') {
       await tgAnswer(cb.id, '⚠');
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'danger_title')}</b>
-<code>${UI.sep}</code>
-<b>⚠  ${t(lang,'danger_warn')}</b>
-<code>${UI.sep}</code>`,
-        { inline_keyboard: [
-          [{ text: t(lang,'danger_del_active'), callback_data:'danger_ativas' }],
-          [{ text: t(lang,'danger_del_all'),    callback_data:'danger_tudo' }],
-          [{ text: t(lang,'btn_back'),          callback_data:'m_home' }]
-        ]});
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'danger_title')}</b>\n<code>${UI.sep}</code>\n<b>⚠  ${t(lang,'danger_warn')}</b>\n<code>${UI.sep}</code>`, { inline_keyboard: [[{ text: t(lang,'danger_del_active'), callback_data:'danger_ativas' }],[{ text: t(lang,'danger_del_all'), callback_data:'danger_tudo' }],[{ text: t(lang,'btn_back'), callback_data:'m_home' }]] });
       return;
     }
-    if (data === 'danger_ativas') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `${UI.header(lang)}\n\n<b>⚠  CONFIRMAR</b>\n<code>${UI.sep}</code>\n${t(lang,'danger_confirm_active')}`,
-      { inline_keyboard: [
-        [{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_ativas' }],
-        [{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]
-      ]}); }
-    if (data === 'danger_tudo') { await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `${UI.header(lang)}\n\n<b>💣  CONFIRMAR</b>\n<code>${UI.sep}</code>\n${t(lang,'danger_confirm_all')}`,
-      { inline_keyboard: [
-        [{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_tudo' }],
-        [{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]
-      ]}); }
+    if (data === 'danger_ativas') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>⚠  CONFIRMAR</b>\n<code>${UI.sep}</code>\n${t(lang,'danger_confirm_active')}`, { inline_keyboard: [[{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_ativas' }],[{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]] }); }
+    if (data === 'danger_tudo') { await tgAnswer(cb.id); return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>💣  CONFIRMAR</b>\n<code>${UI.sep}</code>\n${t(lang,'danger_confirm_all')}`, { inline_keyboard: [[{ text: t(lang,'btn_confirm_yes'), callback_data:'confirm_tudo' }],[{ text: t(lang,'btn_confirm_no'), callback_data:'m_perigo' }]] }); }
     if (data === 'confirm_ativas') {
       await tgAnswer(cb.id, '…');
       const keys = await redisKeys('ASHEO-*'); let n = 0;
       for (const k of keys) { const l = await redisGet(k); if (l && l.ativa) { await redisDel(k); n++; } }
-      return tgEdit(chatId, msgId, `✓  <b>${t(lang,'danger_done',{n})}</b>`,
-        { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
+      return tgEdit(chatId, msgId, `✓  <b>${t(lang,'danger_done',{n})}</b>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
     }
     if (data === 'confirm_tudo') {
       await tgAnswer(cb.id, '💣');
       const keys = await redisKeys('ASHEO-*');
       for (const k of keys) await redisDel(k);
-      return tgEdit(chatId, msgId, `💣  <b>${t(lang,'danger_done',{n:keys.length})}</b>`,
-        { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
+      return tgEdit(chatId, msgId, `💣  <b>${t(lang,'danger_done',{n:keys.length})}</b>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
     }
-
-    /* ── DETALHES ── */
     if (data.startsWith('c_')) {
       const k = data.substring(2), l = await redisGet(k);
       if (!l) { await tgAnswer(cb.id, '✕'); return; }
@@ -909,53 +614,13 @@ ${UI.kv('◔', t(lang,'stats_rate'),    `<b>${taxa}%</b>`)}
       const pct = l.lifetime ? 100 : Math.max(0, Math.min(100, Math.round(((l.expiraEm-Date.now())/(l.dias*86400000))*100)));
       const pk = PACOTES[l.plano] || { emoji:'◆' };
       const statusTxt = !l.ativa ? t(lang,'detail_revoked') : (Date.now() > l.expiraEm && !l.lifetime ? t(lang,'status_expired') : t(lang,'detail_active'));
-      await tgEdit(chatId, msgId,
-`${UI.header(lang)}
-
-<b>${t(lang,'detail_title')}</b>
-<code>${UI.sep}</code>
-<b>⌬  ${t(lang,'detail_key')}</b>
-<code>${k}</code>
-<code>${UI.sep}</code>
-${UI.kv(pk.emoji, t(lang,'gen_plan'), `<b>${l.planoNome}</b>`)}
-${UI.kv('◆', t(lang,'gen_price'), `<code>${precoFmt(l.preco)}</code>`)}
-${UI.kv('◔', t(lang,'gen_issued'), formatDate(l.criadaEm))}
-${UI.kv('◕', t(lang,'gen_expires'), l.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(l.expiraEm))}
-${UI.kv('⟡', t(lang,'detail_remaining'), `<b>${resta}</b>`)}
-${UI.kv('∞', t(lang,'gen_lifetime'), l.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`)}
-${UI.kv('◉', t(lang,'detail_status'), statusTxt)}
-${UI.kv('⟡', t(lang,'detail_install'), l.installId?`<code>${l.installId.substring(0,16)}…</code>`:`<i>${t(lang,'detail_not_linked')}</i>`)}
-<code>${UI.sep}</code>
-<code>${progressBar(pct)}</code> ${pct}%`,
-        { inline_keyboard: [
-          [{ text: l.installId ? t(lang,'act_unlink') : t(lang,'act_link'), callback_data: l.installId?`dv_${k}`:`v_${k}` }],
-          [{ text: t(lang,'act_revoke'), callback_data:`rv_${k}` }, { text: t(lang,'act_delete'), callback_data:`dl_${k}` }],
-          [{ text: t(lang,'btn_menu'),   callback_data:'m_home' }]
-        ]});
+      await tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'detail_title')}</b>\n<code>${UI.sep}</code>\n<b>⌬  ${t(lang,'detail_key')}</b>\n<code>${k}</code>\n<code>${UI.sep}</code>\n${UI.kv(pk.emoji, t(lang,'gen_plan'), `<b>${l.planoNome}</b>`)}\n${UI.kv('◆', t(lang,'gen_price'), `<code>${precoFmt(l.preco)}</code>`)}\n${UI.kv('◔', t(lang,'gen_issued'), formatDate(l.criadaEm))}\n${UI.kv('◕', t(lang,'gen_expires'), l.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(l.expiraEm))}\n${UI.kv('⟡', t(lang,'detail_remaining'), `<b>${resta}</b>`)}\n${UI.kv('∞', t(lang,'gen_lifetime'), l.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`)}\n${UI.kv('◉', t(lang,'detail_status'), statusTxt)}\n${UI.kv('⟡', t(lang,'detail_install'), l.installId?`<code>${l.installId.substring(0,16)}…</code>`:`<i>${t(lang,'detail_not_linked')}</i>`)}\n<code>${UI.sep}</code>\n<code>${progressBar(pct)}</code> ${pct}%`, { inline_keyboard: [[{ text: l.installId ? t(lang,'act_unlink') : t(lang,'act_link'), callback_data: l.installId?`dv_${k}`:`v_${k}` }],[{ text: t(lang,'act_revoke'), callback_data:`rv_${k}` }, { text: t(lang,'act_delete'), callback_data:`dl_${k}` }],[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
       return;
     }
-    if (data.startsWith('v_')) { const k = data.substring(2); await tgAnswer(cb.id); return tgEdit(chatId, msgId,
-      `${UI.header(lang)}\n\n<b>${t(lang,'act_link')}</b>\n<code>/activate &lt;installId&gt; ${k}</code>`,
-      { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
-    if (data.startsWith('dv_')) {
-      const k = data.substring(3), l = await redisGet(k);
-      if (l) { l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); }
-      await tgAnswer(cb.id, '⌬');
-      return tgEdit(chatId, msgId, `✓ ${t(lang,'act_unlink')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] });
-    }
-    if (data.startsWith('rv_')) {
-      const k = data.substring(3), l = await redisGet(k);
-      if (l) { l.ativa = false; await redisSet(k, JSON.stringify(l)); }
-      await tgAnswer(cb.id, '✕');
-      return tgEdit(chatId, msgId, `✕ ${t(lang,'act_revoke')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] });
-    }
-    if (data.startsWith('dl_')) {
-      const k = data.substring(3);
-      await redisDel(k);
-      await tgAnswer(cb.id, '✕');
-      return tgEdit(chatId, msgId, `✕ ${t(lang,'act_delete')}`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
-    }
-
+    if (data.startsWith('v_')) { const k = data.substring(2); await tgAnswer(cb.id); return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'act_link')}</b>\n<code>/activate &lt;installId&gt; ${k}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
+    if (data.startsWith('dv_')) { const k = data.substring(3), l = await redisGet(k); if (l) { l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); } await tgAnswer(cb.id, '⌬'); return tgEdit(chatId, msgId, `✓ ${t(lang,'act_unlink')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
+    if (data.startsWith('rv_')) { const k = data.substring(3), l = await redisGet(k); if (l) { l.ativa = false; await redisSet(k, JSON.stringify(l)); } await tgAnswer(cb.id, '✕'); return tgEdit(chatId, msgId, `✕ ${t(lang,'act_revoke')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:`c_${k}` }]] }); }
+    if (data.startsWith('dl_')) { const k = data.substring(3); await redisDel(k); await tgAnswer(cb.id, '✕'); return tgEdit(chatId, msgId, `✕ ${t(lang,'act_delete')}`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); }
     await tgAnswer(cb.id);
   } catch (e) {
     log('ERRO', 'Callback: ' + e.message);
@@ -963,9 +628,6 @@ ${UI.kv('⟡', t(lang,'detail_install'), l.installId?`<code>${l.installId.substr
   }
 }
 
-/* ═══════════════════════════════════════════════
-   ◈ MESSAGE HANDLER — suporte + comandos
-   ═══════════════════════════════════════════════ */
 async function handleMessage(msg) {
   const chatId = msg.chat.id, userId = String(msg.from.id);
   const texto = (msg.text || '').trim();
@@ -974,228 +636,48 @@ async function handleMessage(msg) {
   const isOwner = userId === String(OWNER_ID);
   const lang = USER_LANG.get(String(chatId)) || 'pt';
 
-  /* ── Sessão suporte ── */
   const sessao = SUPPORT_SESSIONS.get(String(chatId));
   if (sessao && sessao.step === 'waiting') {
-    if (cmd === '/cancelar' || cmd === '/cancel' || cmd === 'cancelar' || cmd === 'cancel') {
-      SUPPORT_SESSIONS.delete(String(chatId));
-      await tgSend(chatId, `<b>${t(lang,'support_cancelled')}</b>\n\nUse /start.`);
-      return;
-    }
+    if (cmd === '/cancelar' || cmd === '/cancel' || cmd === 'cancelar' || cmd === 'cancel') { SUPPORT_SESSIONS.delete(String(chatId)); await tgSend(chatId, `<b>${t(lang,'support_cancelled')}</b>\n\nUse /start.`); return; }
     SUPPORT_SESSIONS.delete(String(chatId));
     const userInfo = `${msg.from.first_name||''} ${msg.from.last_name||''}`.trim() || 'Sem nome';
     const username = msg.from.username ? `@${msg.from.username}` : 'sem username';
-
-    await tgSend(chatId,
-`${UI.header(lang)}
-
-<b>${t(lang,'support_sent')}</b>
-<code>${UI.sep}</code>
-
-${t(lang,'support_sent_desc')}
-
-<code>${UI.sep}</code>
-<i>${lang==='en'?'You will receive the reply here.':'Você receberá a resposta aqui.'}</i>`,
-      { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
-
-    if (!isOwner) {
-      await tgSend(OWNER_ID,
-`<b>◈ ──『 ✆ NOVA MENSAGEM 』── ◈</b>
-<code>${UI.sep}</code>
-<b>◉  Nome:</b> ${userInfo}
-<b>◈  User:</b> ${username}
-<b>⌬  Chat ID:</b> <code>${chatId}</code>
-<b>◐  Idioma:</b> ${lang.toUpperCase()}
-<code>${UI.sep}</code>
-<b>✎  Mensagem:</b>
-${texto}
-
-<code>${UI.sep}</code>
-<i>Responda com:</i>
-<code>/resp ${chatId} sua mensagem</code>`);
-    }
+    await tgSend(chatId, `${UI.header(lang)}\n\n<b>${t(lang,'support_sent')}</b>\n<code>${UI.sep}</code>\n\n${t(lang,'support_sent_desc')}\n\n<code>${UI.sep}</code>\n<i>${lang==='en'?'You will receive the reply here.':'Você receberá a resposta aqui.'}</i>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
+    if (!isOwner) { await tgSend(OWNER_ID, `<b>◈ ──『 ✆ NOVA MENSAGEM 』── ◈</b>\n<code>${UI.sep}</code>\n<b>◉  Nome:</b> ${userInfo}\n<b>◈  User:</b> ${username}\n<b>⌬  Chat ID:</b> <code>${chatId}</code>\n<b>◐  Idioma:</b> ${lang.toUpperCase()}\n<code>${UI.sep}</code>\n<b>✎  Mensagem:</b>\n${texto}\n\n<code>${UI.sep}</code>\n<i>Responda com:</i>\n<code>/resp ${chatId} sua mensagem</code>`); }
     log('SUPPORT', `Msg de ${chatId}: ${texto.substring(0,50)}`);
     return;
   }
 
-  /* ── Não-owner ── */
   if (!isOwner) {
     if (cmd === '/start' || cmd === '/contacto' || cmd === '/contact' || cmd === '/ajuda' || cmd === '/help' || cmd === '/lang') {
-      if (cmd === '/lang') {
-        await tgSend(chatId,
-`<b>◐  ${t(lang,'lang_select')}</b>`,
-          { inline_keyboard: [
-            [{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]
-          ]});
-        return;
-      }
-      await tgSend(chatId,
-`${UI.header(lang)}
-
-<b>◈  ${t(lang,'welcome_title')}</b>
-<code>${UI.sep}</code>
-<i>${t(lang,'welcome_desc')}</i>`,
-        { inline_keyboard: [
-          [{ text: t(lang,'contact'), callback_data:'m_contacto' }],
-          [{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]
-        ]});
+      if (cmd === '/lang') { await tgSend(chatId, `<b>◐  ${t(lang,'lang_select')}</b>`, { inline_keyboard: [[{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]] }); return; }
+      await tgSend(chatId, `${UI.header(lang)}\n\n<b>◈  ${t(lang,'welcome_title')}</b>\n<code>${UI.sep}</code>\n<i>${t(lang,'welcome_desc')}</i>`, { inline_keyboard: [[{ text: t(lang,'contact'), callback_data:'m_contacto' }],[{ text: t(lang,'btn_lang'), callback_data:'m_lang' }]] });
       return;
     }
     return;
   }
 
-  /* ═══════ OWNER ═══════ */
   try {
     if (cmd === '/start' || cmd === '/menu') { await cmdStart(chatId); return; }
-    if (cmd === '/lang') {
-      await tgSend(chatId,
-`<b>◐  ${t(lang,'lang_select')}</b>`,
-        { inline_keyboard: [
-          [{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]
-        ]});
-      return;
-    }
-
+    if (cmd === '/lang') { await tgSend(chatId, `<b>◐  ${t(lang,'lang_select')}</b>`, { inline_keyboard: [[{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]] }); return; }
     if (cmd === '/resp') {
-      const target = args[1];
-      const resposta = args.slice(2).join(' ');
+      const target = args[1]; const resposta = args.slice(2).join(' ');
       if (!target || !resposta) { await tgSend(chatId, `⚠  <code>/resp &lt;chatId&gt; &lt;mensagem&gt;</code>`); return; }
       const targetLang = USER_LANG.get(String(target)) || 'pt';
-      await tgSend(target,
-`<b>◈ ──『 ✆ RESPOSTA DO SUPORTE 』── ◈</b>
-<code>${UI.sep}</code>
-
-${resposta}
-
-<code>${UI.sep}</code>
-<i>Mozlince Nebula Support</i>`,
-        { inline_keyboard: [[{ text: t(targetLang,'contact'), callback_data:'m_contacto' }]] });
+      await tgSend(target, `<b>◈ ──『 ✆ RESPOSTA DO SUPORTE 』── ◈</b>\n<code>${UI.sep}</code>\n\n${resposta}\n\n<code>${UI.sep}</code>\n<i>Mozlince Nebula Support</i>`, { inline_keyboard: [[{ text: t(targetLang,'contact'), callback_data:'m_contacto' }]] });
       await tgSend(chatId, `✓  Resposta enviada para <code>${target}</code>`);
       log('SUPPORT', `Resposta → ${target}`);
       return;
     }
-
-    if (cmd === '/gerar') {
-      const kb = { inline_keyboard: [] };
-      const entries = Object.entries(PACOTES);
-      for (let i = 0; i < entries.length; i += 2) {
-        const linha = [{ text: `${entries[i][1].emoji} ${entries[i][1].nome} · ${precoFmt(entries[i][1].preco)}`, callback_data:`g_${entries[i][0]}` }];
-        if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` });
-        kb.inline_keyboard.push(linha);
-      }
-      await tgSend(chatId, `<b>⚡  ${t(lang,'gen_title')}</b>`, kb);
-      return;
-    }
-
-    if (cmd === '/listar') {
-      const keys = await redisKeys('ASHEO-*');
-      if (keys.length === 0) { await tgSend(chatId, `<i>${t(lang,'list_empty')}</i>`); return; }
-      let txt = `<b>${t(lang,'list_title')} (${keys.length})</b>\n<code>${UI.sep}</code>\n`;
-      for (let i = 0; i < Math.min(keys.length, 30); i++) {
-        const l = await redisGet(keys[i]); if (!l) continue;
-        const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now());
-        const emoji = l.lifetime ? '∞' : (l.ativa ? '●' : '○');
-        txt += `<b>${emoji}</b> <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n`;
-      }
-      await tgSend(chatId, txt);
-      return;
-    }
-
-    if (cmd === '/status') {
-      const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠  /status &lt;chave&gt;`); return; }
-      const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; }
-      const resta = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now());
-      const pk = PACOTES[l.plano] || { emoji:'◆' };
-      await tgSend(chatId,
-`<b>◉  ${t(lang,'detail_title')}</b>
-<code>${UI.sep}</code>
-<b>⌬  ${t(lang,'detail_key')}:</b> <code>${k}</code>
-<b>${pk.emoji}  ${t(lang,'gen_plan')}:</b> ${l.planoNome}
-<b>◆  ${t(lang,'gen_price')}:</b> ${precoFmt(l.preco)}
-<b>◔  ${t(lang,'gen_issued')}:</b> ${formatDate(l.criadaEm)}
-<b>◕  ${t(lang,'gen_expires')}:</b> ${l.lifetime?t(lang,'gen_never'):formatDate(l.expiraEm)}
-<b>⟡  ${t(lang,'detail_remaining')}:</b> ${resta}
-<b>∞  ${t(lang,'gen_lifetime')}:</b> ${l.lifetime?'✓':'✕'}
-<b>◉  ${t(lang,'detail_status')}:</b> ${l.ativa?t(lang,'detail_active'):t(lang,'detail_revoked')}`);
-      return;
-    }
-
-    if (cmd === '/activate') {
-      const chave = args[args.length-1], installId = args.slice(1, args.length-1).join(' ');
-      if (!installId || !chave) { await tgSend(chatId, `⚠  /activate &lt;id&gt; &lt;chave&gt;`); return; }
-      const l = await redisGet(chave);
-      if (!l) { await tgSend(chatId, `✕  Inválida`); return; }
-      if (l.installId) { await tgSend(chatId, `⚠  Já vinculada`); return; }
-      l.installId = installId; l.ativadaEm = Date.now();
-      await redisSet(chave, JSON.stringify(l));
-      await tgSend(chatId, `✓  Vinculada!\n⌬ <code>${chave}</code>\n⟡ <code>${installId}</code>`);
-      return;
-    }
-
-    if (cmd === '/desvincular') {
-      const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠`); return; }
-      const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `✕`); return; }
-      l.installId = null; l.ativadaEm = null;
-      await redisSet(k, JSON.stringify(l));
-      await tgSend(chatId, `⌬  Desvinculada`);
-      return;
-    }
-
-    if (cmd === '/revogar') {
-      const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠`); return; }
-      const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `✕`); return; }
-      l.ativa = false;
-      await redisSet(k, JSON.stringify(l));
-      await tgSend(chatId, `✕  Revogada`);
-      return;
-    }
-
-    if (cmd === '/deletar') {
-      const k = args[1];
-      if (!k) { await tgSend(chatId, `⚠  <code>/deletar &lt;chave&gt;</code>`); return; }
-      const l = await redisGet(k);
-      if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; }
-      await redisDel(k);
-      await tgSend(chatId, `✕  Deletada: <code>${k}</code>`);
-      return;
-    }
-
-    if (cmd === '/deletartudo') {
-      const keys = await redisKeys('ASHEO-*');
-      for (const k of keys) await redisDel(k);
-      await tgSend(chatId, `💣  <b>${keys.length}</b> licenças apagadas.`);
-      return;
-    }
-
-    if (cmd === '/stats') {
-      const keys = await redisKeys('ASHEO-*');
-      let ativas=0, exp=0, vinc=0, life=0, receita=0;
-      for (const k of keys) {
-        const l = await redisGet(k); if (!l) continue;
-        if (l.ativa) ativas++;
-        if (!l.lifetime && l.expiraEm < Date.now()) exp++;
-        if (l.installId) vinc++;
-        if (l.lifetime) life++;
-        if (l.preco) receita += Number(l.preco) || 0;
-      }
-      await tgSend(chatId,
-`<b>◧  ${t(lang,'stats_title')}</b>
-<code>${UI.sep}</code>
-<b>◈</b> ${t(lang,'stats_total')}: <code>${keys.length}</code>
-<b>●</b> ${t(lang,'stats_active')}: <code>${ativas}</code>
-<b>○</b> ${t(lang,'stats_expired')}: <code>${exp}</code>
-<b>⟡</b> ${t(lang,'stats_linked')}: <code>${vinc}</code>
-<b>∞</b> ${t(lang,'stats_lifetime')}: <code>${life}</code>
-<b>◆</b> ${t(lang,'stats_revenue')}: <code>${precoFmt(receita)}</code>`);
-      return;
-    }
-
+    if (cmd === '/gerar') { const kb = { inline_keyboard: [] }; const entries = Object.entries(PACOTES); for (let i = 0; i < entries.length; i += 2) { const linha = [{ text: `${entries[i][1].emoji} ${entries[i][1].nome} · ${precoFmt(entries[i][1].preco)}`, callback_data:`g_${entries[i][0]}` }]; if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` }); kb.inline_keyboard.push(linha); } await tgSend(chatId, `<b>⚡  ${t(lang,'gen_title')}</b>`, kb); return; }
+    if (cmd === '/listar') { const keys = await redisKeys('ASHEO-*'); if (keys.length === 0) { await tgSend(chatId, `<i>${t(lang,'list_empty')}</i>`); return; } let txt = `<b>${t(lang,'list_title')} (${keys.length})</b>\n<code>${UI.sep}</code>\n`; for (let i = 0; i < Math.min(keys.length, 30); i++) { const l = await redisGet(keys[i]); if (!l) continue; const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now()); const emoji = l.lifetime ? '∞' : (l.ativa ? '●' : '○'); txt += `<b>${emoji}</b> <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n`; } await tgSend(chatId, txt); return; }
+    if (cmd === '/status') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠  /status &lt;chave&gt;`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; } const resta = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now()); const pk = PACOTES[l.plano] || { emoji:'◆' }; await tgSend(chatId, `<b>◉  ${t(lang,'detail_title')}</b>\n<code>${UI.sep}</code>\n<b>⌬  ${t(lang,'detail_key')}:</b> <code>${k}</code>\n<b>${pk.emoji}  ${t(lang,'gen_plan')}:</b> ${l.planoNome}\n<b>◆  ${t(lang,'gen_price')}:</b> ${precoFmt(l.preco)}\n<b>◔  ${t(lang,'gen_issued')}:</b> ${formatDate(l.criadaEm)}\n<b>◕  ${t(lang,'gen_expires')}:</b> ${l.lifetime?t(lang,'gen_never'):formatDate(l.expiraEm)}\n<b>⟡  ${t(lang,'detail_remaining')}:</b> ${resta}\n<b>∞  ${t(lang,'gen_lifetime')}:</b> ${l.lifetime?'✓':'✕'}\n<b>◉  ${t(lang,'detail_status')}:</b> ${l.ativa?t(lang,'detail_active'):t(lang,'detail_revoked')}`); return; }
+    if (cmd === '/activate') { const chave = args[args.length-1], installId = args.slice(1, args.length-1).join(' '); if (!installId || !chave) { await tgSend(chatId, `⚠  /activate &lt;id&gt; &lt;chave&gt;`); return; } const l = await redisGet(chave); if (!l) { await tgSend(chatId, `✕  Inválida`); return; } if (l.installId) { await tgSend(chatId, `⚠  Já vinculada`); return; } l.installId = installId; l.ativadaEm = Date.now(); await redisSet(chave, JSON.stringify(l)); await tgSend(chatId, `✓  Vinculada!\n⌬ <code>${chave}</code>\n⟡ <code>${installId}</code>`); return; }
+    if (cmd === '/desvincular') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕`); return; } l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); await tgSend(chatId, `⌬  Desvinculada`); return; }
+    if (cmd === '/revogar') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕`); return; } l.ativa = false; await redisSet(k, JSON.stringify(l)); await tgSend(chatId, `✕  Revogada`); return; }
+    if (cmd === '/deletar') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠  <code>/deletar &lt;chave&gt;</code>`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; } await redisDel(k); await tgSend(chatId, `✕  Deletada: <code>${k}</code>`); return; }
+    if (cmd === '/deletartudo') { const keys = await redisKeys('ASHEO-*'); for (const k of keys) await redisDel(k); await tgSend(chatId, `💣  <b>${keys.length}</b> licenças apagadas.`); return; }
+    if (cmd === '/stats') { const keys = await redisKeys('ASHEO-*'); let ativas=0, exp=0, vinc=0, life=0, receita=0; for (const k of keys) { const l = await redisGet(k); if (!l) continue; if (l.ativa) ativas++; if (!l.lifetime && l.expiraEm < Date.now()) exp++; if (l.installId) vinc++; if (l.lifetime) life++; if (l.preco) receita += Number(l.preco) || 0; } await tgSend(chatId, `<b>◧  ${t(lang,'stats_title')}</b>\n<code>${UI.sep}</code>\n<b>◈</b> ${t(lang,'stats_total')}: <code>${keys.length}</code>\n<b>●</b> ${t(lang,'stats_active')}: <code>${ativas}</code>\n<b>○</b> ${t(lang,'stats_expired')}: <code>${exp}</code>\n<b>⟡</b> ${t(lang,'stats_linked')}: <code>${vinc}</code>\n<b>∞</b> ${t(lang,'stats_lifetime')}: <code>${life}</code>\n<b>◆</b> ${t(lang,'stats_revenue')}: <code>${precoFmt(receita)}</code>`); return; }
     await tgSend(chatId, `❓ Use /start`);
   } catch (e) { log('ERRO', 'Message: ' + e.message); }
 }
@@ -1203,61 +685,114 @@ ${resposta}
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body;
-  try {
-    if (update.callback_query) return handleCallback(update.callback_query);
-    if (update.message && update.message.text) return handleMessage(update.message);
-  } catch (e) { log('ERRO', 'Webhook: ' + e.message); }
+  try { if (update.callback_query) return handleCallback(update.callback_query); if (update.message && update.message.text) return handleMessage(update.message); } catch (e) { log('ERRO', 'Webhook: ' + e.message); }
 });
 
 /* ═══════════════════════════════════════════════
-   ◈ API REST v8.1
+   ◈ API REST v8.2
    ═══════════════════════════════════════════════ */
-const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.1',codename:'Aurora',timestamp:new Date().toISOString()});
-app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.1',status:'live'}));
+const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.2',codename:'Aurora+',timestamp:new Date().toISOString()});
+app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.2',status:'live'}));
 app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
-
-const versionHandler = (req,res)=>res.json({ok:true,version:'8.1',codename:'Aurora',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
+const versionHandler = (req,res)=>res.json({ok:true,version:'8.2',codename:'Aurora+',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
 app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
-const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.1',hora:new Date().toISOString()});
+const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.2',hora:new Date().toISOString()});
 app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
 
+/* ═══════════════════════════════════════════════
+   ◈ ROTA: /v1/bootstrap — ENTREGA O ENVELOPE + _PROV
+   ═══════════════════════════════════════════════ */
 function bootstrapHandler(req,res){
   const auth=validateBearer(req);
-  log('BOOT',`Bootstrap (auth=${auth.ok})`);
+  const installId = req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
+  const prov = generateProv(installId);
+  log('BOOT',`Bootstrap (auth=${auth.ok}) installId=${installId.substring(0,12)}... prov=${prov?'✓':'✗'}`);
   res.json({
-    ok:true,version:'8.1',codename:'Aurora',apiVersion:'v1',
-    issuedAt:new Date().toISOString(),serverTime:Date.now(),
-    source:'premium',sourceType:'server',isFounder:true,tier:'premium',kind:'premium',
+    ok:true, version:'8.2', codename:'Aurora+', apiVersion:'v1',
+    issuedAt:new Date().toISOString(), serverTime:Date.now(),
+    source:'premium', sourceType:'server', isFounder:true, tier:'premium', kind:'premium',
+    rulesVersion: RULES_VERSION,
+    paymentRules: {
+      version: RULES_VERSION,
+      rules: PAYMENT_RULES,
+      count: PAYMENT_RULES.length
+    },
+    _prov: prov,
     config:{apiBase:'https://mozlince.onrender.com',featuresEnabled:true,premiumEnabled:true,syncEnabled:true,gatewayMode:'default',telemetryEnabled:false,retryAfterMs:5000,heartbeatMs:60000},
     flags:{bootstrapReady:true,exclusiveEnabled:true,rulesEnabled:true,premium:true},
-    endpoints:{activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',exclusive:'/v1/exclusive/manifest',exclusiveSync:'/v1/exclusive/sync',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support'},
+    endpoints:{
+      activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',
+      verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',
+      campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',
+      support:'/v1/support',paymentRules:'/v1/bootstrap'
+    },
     features:mapFeatures(true),capabilities:mapCapabilities(true),
     limits:{...PREMIUM_LIMITS},scope:PREMIUM_SCOPE
   });
 }
-app.get('/v1/bootstrap',bootstrapHandler); app.get('/api/v1/bootstrap',bootstrapHandler);
+app.get('/v1/bootstrap',bootstrapHandler);
+app.get('/api/v1/bootstrap',bootstrapHandler);
 
+/* ═══════════════════════════════════════════════
+   ◈ ROTA: /v1/rules — ENTREGA AS 45 REGRAS EM TEXTO PURO
+   ═══════════════════════════════════════════════ */
 function rulesHandler(req,res){
   const auth=validateBearer(req);
-  const isPremium=auth.ok&&(auth.decoded.tier==='premium'||auth.decoded.scope);
-  res.json({ok:true,version:3,updatedAt:new Date().toISOString(),source:'premium',tier:'premium',scope:isPremium?PREMIUM_SCOPE:['free'],rules:isPremium?RULES:RULES.slice(0,1),serverTime:Date.now()});
+  const installId = req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
+  const prov = generateProv(installId);
+  res.json({
+    ok:true,
+    version: RULES_VERSION,
+    updatedAt:new Date().toISOString(),
+    source:'premium',
+    tier:'premium',
+    scope: PREMIUM_SCOPE,
+    count: PAYMENT_RULES.length,
+    rules: PAYMENT_RULES,
+    _prov: prov,
+    serverTime:Date.now()
+  });
 }
-app.get('/v1/rules',rulesHandler); app.get('/api/v1/rules',rulesHandler); app.get('/v1/rules/sync',rulesHandler); app.get('/api/v1/sync',rulesHandler);
+app.get('/v1/rules',rulesHandler);
+app.get('/api/v1/rules',rulesHandler);
+app.get('/v1/rules/sync',rulesHandler);
+app.get('/api/v1/sync',rulesHandler);
 
-function exclusiveHandler(req,res){
+/* ═══════════════════════════════════════════════
+   ◈ ROTA: /v1/gateways — LISTA DE GATEWAYS
+   ═══════════════════════════════════════════════ */
+function gatewaysHandler(req,res){
   const auth=validateBearer(req);
-  res.json({ok:true,source:'premium',tier:'premium',manifest:{version:'1.7.0',version_name:'1.7.0',generatedAt:new Date().toISOString(),minVersion:'1.0.0',exclusiveFeatures:Object.keys(PREMIUM_FEATURES),rules:RULES,gateways:GATEWAYS,signature:crypto.randomBytes(64).toString('hex')},cachedAt:Date.now(),expiresAt:Date.now()+(23*3600*1000)});
+  const installId = req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
+  const prov = generateProv(installId);
+  res.json({
+    ok:true,
+    source:'premium',
+    tier:'premium',
+    version: RULES_VERSION,
+    count: PAYMENT_RULES.length,
+    gateways: PAYMENT_RULES,
+    gatewaysMeta: GATEWAYS_META,
+    _prov: prov,
+    serverTime:Date.now()
+  });
 }
-app.get('/v1/exclusive/manifest',exclusiveHandler); app.get('/api/v1/manifest',exclusiveHandler);
-function exclusiveSyncHandler(req,res){
-  res.json({ok:true,source:'premium',tier:'premium',manifest:{version:'1.7.0',generatedAt:new Date().toISOString(),rules:RULES,gateways:GATEWAYS,signature:crypto.randomBytes(64).toString('hex')},cachedAt:Date.now()});
-}
-app.get('/v1/exclusive/sync',exclusiveSyncHandler); app.get('/api/v1/exclusive/sync',exclusiveSyncHandler);
+app.get('/v1/gateways',gatewaysHandler);
+app.get('/api/v1/gateways',gatewaysHandler);
 
-function gatewaysHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',version:1,gateways:GATEWAYS,serverTime:Date.now()});}
-app.get('/v1/gateways',gatewaysHandler); app.get('/api/v1/gateways',gatewaysHandler);
-function campaignHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',campaigns:CAMPAIGNS,serverTime:Date.now()});}
-app.get('/v1/campaign',campaignHandler); app.get('/api/v1/campaign',campaignHandler);
+/* ═══════════════════════════════════════════════
+   ◈ ROTA: /v1/campaign — CAMPANHAS
+   ═══════════════════════════════════════════════ */
+function campaignHandler(req,res){
+  res.json({ok:true,source:'premium',tier:'premium',campaigns:CAMPAIGNS,serverTime:Date.now()});
+}
+app.get('/v1/campaign',campaignHandler);
+app.get('/api/v1/campaign',campaignHandler);
+
+function exclusiveHandler(req,res){ res.json({ok:true,source:'premium',tier:'premium',manifest:{version:'1.7.0',version_name:'1.7.0',generatedAt:new Date().toISOString(),minVersion:'1.0.0',exclusiveFeatures:Object.keys(PREMIUM_FEATURES),rules:PAYMENT_RULES,gateways:GATEWAYS_META,signature:crypto.randomBytes(64).toString('hex')},cachedAt:Date.now(),expiresAt:Date.now()+(23*3600*1000)}); }
+app.get('/v1/exclusive/manifest',exclusiveHandler); app.get('/api/v1/manifest',exclusiveHandler);
+function exclusiveSyncHandler(req,res){ res.json({ok:true,source:'premium',tier:'premium',manifest:{version:'1.7.0',generatedAt:new Date().toISOString(),rules:PAYMENT_RULES,gateways:GATEWAYS_META,signature:crypto.randomBytes(64).toString('hex')},cachedAt:Date.now()}); }
+app.get('/v1/exclusive/sync',exclusiveSyncHandler); app.get('/api/v1/exclusive/sync',exclusiveSyncHandler);
 
 function dashboardHandler(req,res){
   const auth=validateBearer(req);
@@ -1274,7 +809,7 @@ function entitlementHandler(req,res){
 }
 app.get('/v1/entitlement',entitlementHandler); app.get('/api/v1/entitlement',entitlementHandler);
 
-function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.1'});}
+function premiumDefHandler(req,res){res.json({ok:true,source:'premium',tier:'premium',features:PREMIUM_FEATURES,capabilities:PREMIUM_CAPABILITIES,premiumLimits:PREMIUM_LIMITS,freeLimits:FREE_LIMITS,scope:PREMIUM_SCOPE,version:'8.2'});}
 app.get('/v1/premium/definitions',premiumDefHandler); app.get('/api/v1/premium/definitions',premiumDefHandler);
 
 function planosHandler(req,res){res.json({ok:true,currency:'USD',planos:Object.entries(PACOTES).map(([id,p])=>({id,nome:p.nome,dias:p.dias,lifetime:p.lifetime,preco:p.preco,preco_fmt:precoFmt(p.preco),emoji:p.emoji}))});}
@@ -1297,73 +832,30 @@ function supportHandler(req,res){
 }
 app.post('/v1/support',supportHandler); app.post('/api/v1/support',supportHandler);
 
-/* ── Activate — ⚡ v8.1: exp REAL da chave ── */
 async function activateHandler(req,res){
   const inicio=Date.now();
   const {installId,licenseKey,clientTag}=req.body||{};
   log('INFO',`Activate: installId=${installId?installId.substring(0,12)+'...':'?'} | key=${licenseKey?normalizeKey(licenseKey).substring(0,18)+'...':'(vazia)'} | tag=${clientTag||'?'}`);
-
-  if(!licenseKey&&!installId){
-    const auth=validateBearer(req);
-    if(!auth.ok)return res.status(401).json({ok:false,error:'missing_auth'});
-    const feature=(req.body&&req.body.feature)||req.query.feature;
-    if(!feature)return res.status(400).json({ok:false,error:'missing_feature'});
-    if(!PREMIUM_FEATURES[feature])return res.status(404).json({ok:false,error:'unknown_feature'});
-    const now=Math.floor(Date.now()/1000);
-    const token=jwt.sign({sub:auth.decoded.sub,installId:auth.decoded.sub,feature,kind:'feature',type:'feature',tier:'premium',source:'premium',isFounder:true,scope:[feature,'premium'],iat:now,nbf:now-5,exp:now+300,jti:crypto.randomUUID()},PRIVATE_KEY,{algorithm:'ES256'});
-    log('FEAT',`✓ ${feature} | ${auth.decoded.sub} | ${Date.now()-inicio}ms`);
-    return res.json({ok:true,token,feature,expires_in:300,exp:now+300});
-  }
-
+  if(!licenseKey&&!installId){ const auth=validateBearer(req); if(!auth.ok)return res.status(401).json({ok:false,error:'missing_auth'}); const feature=(req.body&&req.body.feature)||req.query.feature; if(!feature)return res.status(400).json({ok:false,error:'missing_feature'}); if(!PREMIUM_FEATURES[feature])return res.status(404).json({ok:false,error:'unknown_feature'}); const now=Math.floor(Date.now()/1000); const token=jwt.sign({sub:auth.decoded.sub,installId:auth.decoded.sub,feature,kind:'feature',type:'feature',tier:'premium',source:'premium',isFounder:true,scope:[feature,'premium'],iat:now,nbf:now-5,exp:now+300,jti:crypto.randomUUID()},PRIVATE_KEY,{algorithm:'ES256'}); log('FEAT',`✓ ${feature} | ${auth.decoded.sub} | ${Date.now()-inicio}ms`); return res.json({ok:true,token,feature,expires_in:300,exp:now+300}); }
   if(!installId||typeof installId!=='string'||installId.length<5)return res.status(400).json({error:'missing_installId'});
   if(!PRIVATE_KEY)return res.status(500).json({error:'server_misconfigured'});
   if(!licenseKey||typeof licenseKey!=='string'||!licenseKey.toUpperCase().startsWith('ASHEO-'))return res.status(401).json({error:'missing_license'});
-
   const keyNorm=normalizeKey(licenseKey);
   const lic=await redisGet(keyNorm);
   if(!lic){log('WARN',`NAO ENCONTRADA: ${keyNorm.substring(0,18)}...`);return res.status(404).json({error:'invalid_license'});}
   if(!lic.ativa)return res.status(403).json({error:'revoked'});
-
-  // ⚡ v8.1 — VERIFICA EXPIRAÇÃO ANTES DE VINCULAR
-  if(!lic.lifetime && Date.now() > lic.expiraEm){
-    log('WARN',`EXPIRADA: ${keyNorm.substring(0,18)}... | criada ${new Date(lic.criadaEm).toISOString()} | expirou ${new Date(lic.expiraEm).toISOString()}`);
-    return res.status(403).json({
-      error:'expired',
-      message:'Esta licença expirou. Renove para continuar.',
-      expiredAt: lic.expiraEm,
-      expiredAtISO: new Date(lic.expiraEm).toISOString()
-    });
-  }
-
+  if(!lic.lifetime && Date.now() > lic.expiraEm){ log('WARN',`EXPIRADA: ${keyNorm.substring(0,18)}...`); return res.status(403).json({error:'expired',message:'Esta licença expirou. Renove para continuar.',expiredAt: lic.expiraEm,expiredAtISO: new Date(lic.expiraEm).toISOString()}); }
   if(!lic.installId){lic.installId=installId;lic.ativadaEm=Date.now();await redisSet(keyNorm,JSON.stringify(lic));log('OK',`Vinculada: ${keyNorm.substring(0,18)}... -> ${installId}`);}
   else if(lic.installId!==installId)return res.status(403).json({error:'already_used'});
-
   try{
     const claims = buildClaims(installId, lic);
     const token=signToken(claims);
     const expiresIn = lic.lifetime ? -1 : Math.max(0, Math.floor((lic.expiraEm - Date.now())/1000));
     log('ATIV',`✓ ${installId.substring(0,12)}... | ${keyNorm.substring(0,18)}... | expira em ${expiresIn}s | ${Date.now()-inicio}ms`);
-    return res.json({
-      token,tier:'premium',kind:'premium',source:'premium',sourceType:'server',isFounder:true,
-      seat:1,seats:1,gwPass:null,plan:'premium',planDisplayName:'Premium',
-      lifetime:lic.lifetime===true,
-      // ⚡ v8.1 — DATA EXATA da chave (não mais calculada)
-      expiresIn,
-      expiresAt: lic.lifetime ? null : lic.expiraEm,
-      expiresAtISO: lic.lifetime ? null : new Date(lic.expiraEm).toISOString(),
-      issuedAt: lic.criadaEm,
-      issuedAtISO: new Date(lic.criadaEm).toISOString(),
-      licenseKey:keyNorm,
-      welcome: {
-        pt: '🎉 Parabéns! Licença ativada com sucesso.',
-        en: '🎉 Congratulations! License successfully activated.'
-      }
-    });
+    return res.json({token,tier:'premium',kind:'premium',source:'premium',sourceType:'server',isFounder:true,seat:1,seats:1,gwPass:null,plan:'premium',planDisplayName:'Premium',lifetime:lic.lifetime===true,expiresIn,expiresAt: lic.lifetime ? null : lic.expiraEm,expiresAtISO: lic.lifetime ? null : new Date(lic.expiraEm).toISOString(),issuedAt: lic.criadaEm,issuedAtISO: new Date(lic.criadaEm).toISOString(),licenseKey:keyNorm,welcome: {pt: '🎉 Parabéns! Licença ativada com sucesso.',en: '🎉 Congratulations! License successfully activated.'}});
   }catch(e){return res.status(500).json({error:'internal',message:e.message});}
 }
-app.post('/v1/activate',activateHandler);
-app.post('/api/v1/activate',activateHandler);
-app.post('/api/v1/license/activate',activateHandler);
+app.post('/v1/activate',activateHandler); app.post('/api/v1/activate',activateHandler); app.post('/api/v1/license/activate',activateHandler);
 
 async function featureActivateHandler(req,res){
   const auth=validateBearer(req);
@@ -1380,10 +872,7 @@ app.post('/api/v1/feature/activate',featureActivateHandler); app.get('/api/v1/fe
 
 async function deactivateHandler(req,res){
   const {installId,licenseKey}=req.body||{};
-  if(licenseKey){
-    const lic=await redisGet(licenseKey);
-    if(lic&&lic.installId===installId){lic.installId=null;lic.ativadaEm=null;await redisSet(licenseKey,JSON.stringify(lic));}
-  }
+  if(licenseKey){ const lic=await redisGet(licenseKey); if(lic&&lic.installId===installId){lic.installId=null;lic.ativadaEm=null;await redisSet(licenseKey,JSON.stringify(lic));} }
   res.json({ok:true,message:'Desativado'});
 }
 app.post('/v1/deactivate',deactivateHandler); app.post('/api/v1/deactivate',deactivateHandler); app.post('/api/v1/license/deactivate',deactivateHandler);
@@ -1395,12 +884,7 @@ function verifyHandler(req,res){
   catch(e){return res.status(401).json({ok:false,valido:false,erro:e.message});}
 }
 app.post('/v1/verify',verifyHandler); app.post('/api/v1/verify',verifyHandler); app.post('/api/v1/license/verify',verifyHandler);
-app.post('/verificar-licenca',(req,res)=>{
-  const {token}=req.body;
-  if(!token)return res.status(400).json({erro:'Token obrigatorio'});
-  try{const d=jwt.verify(token,PUBLIC_KEY||PRIVATE_KEY,{algorithms:['ES256'],clockTolerance:30});res.json({valido:true,dados:d});}
-  catch(e){res.status(401).json({valido:false,erro:e.message});}
-});
+app.post('/verificar-licenca',(req,res)=>{ const {token}=req.body; if(!token)return res.status(400).json({erro:'Token obrigatorio'}); try{const d=jwt.verify(token,PUBLIC_KEY||PRIVATE_KEY,{algorithms:['ES256'],clockTolerance:30});res.json({valido:true,dados:d});} catch(e){res.status(401).json({valido:false,erro:e.message});} });
 
 function heartbeatHandler(req,res){
   const auth=validateBearer(req);
@@ -1412,22 +896,20 @@ app.post('/api/v1/heartbeat',heartbeatHandler); app.get('/api/v1/heartbeat',hear
 
 app.use((req,res)=>{res.status(404).json({ok:false,error:'not_found',path:req.path});});
 
-/* ═══════════════════════════════════════════════
-   ◈ START
-   ═══════════════════════════════════════════════ */
 const PORT=process.env.PORT||3000;
 app.listen(PORT,()=>{
   banner();
-  log('SYS',`Mozlince Nebula v8.1 Aurora na porta ${PORT}`);
+  log('SYS',`Mozlince Nebula v8.2 Aurora+ na porta ${PORT}`);
   log('SYS',`Chave: ${ORIGEM}`);
   log('SYS',`Redis: ${UPSTASH_URL?'OK':'FALTA'}`);
   log('SYS',`Telegram: ${TELEGRAM_TOKEN?'OK':'FALTA'}`);
   log('SYS',`Planos: ${Object.keys(PACOTES).length} (USD)`);
+  log('RULES',`✔ Payment Rules carregadas: ${PAYMENT_RULES.length} regras (v${RULES_VERSION})`);
+  log('RULES',`✔ /v1/bootstrap entrega encPack + _prov assinado ES256`);
+  log('RULES',`✔ /v1/rules entrega regras em texto puro`);
+  log('RULES',`✔ /v1/gateways e /v1/campaign integrados`);
   log('OK', `✔ Expiração REAL — 3d/7d/15d… expiram na hora exata`);
-  log('OK', `✔ JWT usa expiraEm original (nunca renova)`);
-  log('OK', `✔ Data exata retornada à extensão`);
   log('OK', `✔ Tradução TOTAL PT/EN`);
-  log('OK', `✔ Layout premium Aurora`);
   log('OK', `✔ Suporte interativo + /resp`);
 });
 
