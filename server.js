@@ -1,12 +1,13 @@
 /* ═══════════════════════════════════════════════════════════════
-   ✦ MOZLINCE NEBULA  ·  v8.3.4 APOCALYPSE
+   ✦ MOZLINCE NEBULA  ·  v8.4.0 QUANTUM
    © Asheo Systems · Premium License Engine
    ───────────────────────────────────────────────────────────────
-   ◈ v8.3.4 — Compatibilidade TOTAL com Asheo worker original
+   ◈ v8.4.0 — Compatibilidade TOTAL com extensão original Asheo
+     ▸ encPack AES-256-GCM com chave = SHA256(installId:key:asheo-secret-v1)
      ▸ kid=ASHEO-<prefix> | exp=iat+600 | secret determinístico
-     ▸ keyBase64 HKDF | gwPass alinhado | /v1/timehw + /v1/update/check
-     ▸ Rules v33 | encPack funcional | CORS x-asheo-* completo
-     ▸ Bot Telegram premium (ícones Unicode) + DM + Suporte + /resp
+     ▸ Rules v33 (46 gateways) | envelope.v1 + pack.v1
+     ▸ /v1/timehw + /v1/update/check + /v1/campaign (Redis)
+     ▸ Bot Telegram PREMIUM (ícones Unicode) + DM + Suporte + /resp
    ═══════════════════════════════════════════════════════════════ */
 require('dotenv').config();
 const express = require('express');
@@ -22,7 +23,7 @@ app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Headers', ALLOWED_HEADERS);
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Request-Id, x-asheo-proxied, x-asheo-swapped, x-asheo-swap-ok, x-asheo-pack-fmt');
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.3.4');
+  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.4.0');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -36,7 +37,7 @@ const TAGS = { INFO:C.cyanB, OK:C.green, WARN:C.amber, ERRO:C.red, SYS:C.violetB
 function log(t, m) { const ts = new Date().toISOString().replace('T',' ').substring(0,19); const tag = (TAGS[t]||C.gray) + C.b + '▸ ' + t.padEnd(7) + C.r; console.log(`${C.dim}${ts}${C.r} ${tag} ${m}`); }
 function banner() {
   console.log(`\n${C.violet}   ╭──────────────────────────────────────────────╮${C.r}`);
-  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.3.4${C.r} ${C.dim}APOC${C.r}    ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.4.0${C.r} ${C.dim}QUANTUM${C.r}  ${C.violet}│${C.r}`);
   console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · Asheo Systems${C.r}     ${C.violet}│${C.r}`);
   console.log(`${C.violet}   ╰──────────────────────────────────────────────╯${C.r}\n`);
 }
@@ -95,7 +96,7 @@ const PACOTES = {
 const precoFmt = usd => `$${Number(usd).toFixed(2)}`;
 
 /* ═══════════════════════════════════════════════
-   ◈ PAYMENT RULES (v33)
+   ◈ PAYMENT RULES (v33) — 46 gateways
    ═══════════════════════════════════════════════ */
 const PAYMENT_RULES = [
   { defaultId:"stripe.default", defaultVersion:1, isDefault:true, swapCapable:true, enabled:true, name:"Stripe", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)api\\.stripe\\.com(?:\\/|$)",flags:"i"}, matchContentType:"application/x-www-form-urlencoded", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"] },
@@ -145,12 +146,37 @@ const PAYMENT_RULES = [
   { defaultId:"authorizenet.default", defaultVersion:1, isDefault:true, enabled:true, name:"Authorize.Net", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)api2\\.authorize\\.net\\/xml\\/v1\\/request\\.api",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"], swapCapable:false }
 ];
 
+/* ═══════════════════════════════════════════════
+   ◈ EXCLUSIVE MANIFEST TARGETS (adyen style)
+   ═══════════════════════════════════════════════ */
+const EXCLUSIVE_TARGETS = [
+  {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/payments"},
+  {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/sessions"},
+  {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/paymentMethods"},
+  {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/paymentSession"},
+  {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/orders"},
+  {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/adjustAuthorisation"},
+  {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/donations"},
+  {hostSuffix:"checkoutshopper-live-us.adyen.com", id:"adyen", method:"POST", pathPattern:"/payments"},
+  {hostSuffix:"checkoutshopper-live-us.adyen.com", id:"adyen", method:"POST", pathPattern:"/sessions"},
+  {hostSuffix:"checkoutshopper-live-us.adyen.com", id:"adyen", method:"POST", pathPattern:"/paymentMethods"},
+  {hostSuffix:"checkoutshopper-live-eu.adyen.com", id:"adyen", method:"POST", pathPattern:"/payments"},
+  {hostSuffix:"checkoutshopper-live-eu.adyen.com", id:"adyen", method:"POST", pathPattern:"/sessions"},
+  {hostSuffix:"checkoutshopper-test.adyen.com", id:"adyen", method:"POST", pathPattern:"/payments"},
+  {hostSuffix:"checkoutshopper-test.adyen.com", id:"adyen", method:"POST", pathPattern:"/sessions"},
+  {hostSuffix:"checkoutshopper-test.adyen.com", id:"adyen", method:"POST", pathPattern:"/paymentMethods"},
+  {hostSuffix:"pal-test.adyen.com", id:"adyen", method:"POST", pathPattern:"/pal/servlet/"},
+  {hostSuffix:"pal-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/pal/servlet/"}
+];
+
 const GATEWAYS_META = [
   {id:'default-stripe',name:'Stripe',pattern:'https://js.stripe.com/*',enabled:true,isDefault:true},
   {id:'default-checkout',name:'Checkout.com',pattern:'https://*.checkout.com/*',enabled:true,isDefault:true},
   {id:'default-adyen',name:'Adyen',pattern:'https://*.adyen.com/*',enabled:true,isDefault:true},
   {id:'default-braintree',name:'Braintree',pattern:'https://*.braintreegateway.com/*',enabled:true,isDefault:true}
 ];
+
+const CAMPAIGNS = [{id:'default-1',name:'Default Campaign',enabled:true,createdAt:new Date().toISOString()}];
 
 /* ═══════════════════════════════════════════════
    ◈ REDIS
@@ -185,7 +211,7 @@ function migrarLicenca(lic) {
   n.preco_usd = n.preco; n.preco_fmt = precoFmt(n.preco);
   return n;
 }
-function signToken(claims){ if(!PRIVATE_KEY) throw new Error('Chave privada nao inicializada'); return jwt.sign(claims, PRIVATE_KEY, { algorithm:'ES256' }); }
+function signToken(claims, kid){ if(!PRIVATE_KEY) throw new Error('Chave privada nao inicializada'); const opts = { algorithm:'ES256' }; if (kid) opts.keyid = kid; return jwt.sign(claims, PRIVATE_KEY, opts); }
 function formatDate(ts){ if(!ts) return 'Nunca'; return new Date(ts).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}); }
 function humanTime(ms){ if(ms<=0) return '✕ expirada'; const s=Math.floor(ms/1000), d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60); if(d>0) return `${d}d ${h}h ${m}m`; if(h>0) return `${h}h ${m}m`; return `${m}m`; }
 function progressBar(pct, size=10){ pct = Math.max(0, Math.min(100, pct)); const cheio = Math.round(pct*size/100); return '▰'.repeat(cheio) + '▱'.repeat(size-cheio); }
@@ -193,8 +219,18 @@ function generateLicenseKey(){ const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; c
 function validateBearer(req){ const auth=req.headers['authorization']||''; if(!auth.startsWith('Bearer '))return {ok:false,error:'missing_bearer'}; try{ const d=jwt.verify(auth.substring(7),PUBLIC_KEY||PRIVATE_KEY,{algorithms:['ES256'],clockTolerance:30}); return {ok:true,decoded:d}; } catch(e){ return {ok:false,error:e.message}; } }
 
 /* ═══════════════════════════════════════════════
-   ◈ ENTITLEMENT / SECRET / KID / HKDF
+   ◈ SECRET · KID · ENTITLEMENT
    ═══════════════════════════════════════════════ */
+function buildSecret(installId, licenseKey) {
+  return crypto.createHash('sha256').update(String(installId||'') + ':' + String(licenseKey||'') + ':asheo-secret-v1').digest('hex');
+}
+function buildKid(licenseKey) {
+  if (!licenseKey) return null;
+  const norm = normalizeKey(licenseKey);
+  const parts = norm.split('-');
+  if (parts.length >= 2 && parts[0] === 'ASHEO') return `${parts[0]}-${parts[1]}`;
+  return norm.substring(0, 14);
+}
 function buildEntitlement(lic, installId, seatsUsed = 1) {
   const isPremium = lic && lic.ativa && (lic.lifetime || lic.expiraEm > Date.now());
   const plano = lic ? lic.plano : 'free';
@@ -228,26 +264,17 @@ function buildEntitlement(lic, installId, seatsUsed = 1) {
   };
 }
 
-function buildSecret(installId, licenseKey) {
-  return crypto.createHash('sha256').update(String(installId||'') + ':' + String(licenseKey||'') + ':asheo-secret-v1').digest('hex');
+/* ═══════════════════════════════════════════════
+   ◈ ENCRYPT PACK — AES-256-GCM com chave determinística
+   ═══════════════════════════════════════════════ */
+function deriveAesKey(installId, licenseKey) {
+  /* ⚡ Chave = os 32 bytes do secret (mesmo do /v1/activate)
+     SHA256(installId:licenseKey:asheo-secret-v1) → 64 hex → 32 bytes */
+  const secretHex = buildSecret(installId, licenseKey || 'guest');
+  return Buffer.from(secretHex, 'hex');
 }
-
-function buildKid(licenseKey) {
-  if (!licenseKey) return null;
-  const norm = normalizeKey(licenseKey);
-  // ASHEO-FREEREF-82CG-98N6-9WNA  →  ASHEO-FREEREF
-  const parts = norm.split('-');
-  if (parts.length >= 2 && parts[0] === 'ASHEO') return `${parts[0]}-${parts[1]}`;
-  return norm.substring(0, 14);
-}
-
-/* HKDF determinístico por installId → chave AES de 32 bytes para encPack */
-function deriveKey(installId, salt = 'asheo-pack-v1') {
-  const base = PRIVATE_KEY || 'fallback-secret-asheo';
-  return crypto.hkdfSync('sha256', Buffer.from(base), Buffer.from(String(installId||'default')), Buffer.from(salt), 32);
-}
-function encryptPack(data, installId) {
-  const key = Buffer.from(deriveKey(installId));
+function encryptPack(data, installId, licenseKey) {
+  const key = deriveAesKey(installId, licenseKey);
   const nonce = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
   const encrypted = Buffer.concat([cipher.update(JSON.stringify(data), 'utf8'), cipher.final()]);
@@ -260,29 +287,33 @@ function encryptPack(data, installId) {
    ◈ PROV · GW PASS
    ═══════════════════════════════════════════════ */
 const provCache = new Map();
-function generateProv(installId) {
+function generateProv(installId, kid) {
   if (!PRIVATE_KEY) return null;
   const key = installId || 'default';
   const cached = provCache.get(key);
   if (cached && (Date.now() - cached.ts) < 55 * 60 * 1000) return cached.prov;
   try {
-    const prov = jwt.sign({ sub: key, jti: crypto.randomUUID(), iat: Math.floor(Date.now()/1000) }, PRIVATE_KEY, { algorithm:'ES256', expiresIn:'1h' });
+    const opts = { algorithm:'ES256', expiresIn:'1h' };
+    if (kid) opts.keyid = kid;
+    const prov = jwt.sign({ sub: key, jti: crypto.randomUUID(), iat: Math.floor(Date.now()/1000) }, PRIVATE_KEY, opts);
     provCache.set(key, { prov, ts: Date.now() });
     return prov;
   } catch (e) { log('ERRO','generateProv: '+e.message); return null; }
 }
-function buildGwPass(installId, expSec) {
+function buildGwPass(installId, expSec, kid) {
   if (!PRIVATE_KEY) return null;
   const now = Math.floor(Date.now()/1000);
   const exp = expSec || (now + 600);
-  return jwt.sign({ sub: installId, purpose:'gw-pass', iat: now, exp, jti: crypto.randomUUID() }, PRIVATE_KEY, { algorithm:'ES256' });
+  const opts = { algorithm:'ES256' };
+  if (kid) opts.keyid = kid;
+  return jwt.sign({ sub: installId, purpose:'gw-pass', iat: now, exp, jti: crypto.randomUUID() }, PRIVATE_KEY, opts);
 }
 
 /* ═══════════════════════════════════════════════
    ◈ RATE LIMIT
    ═══════════════════════════════════════════════ */
 const rlMap = new Map();
-function rateLimit(key, max = 10, windowMs = 60000) {
+function rateLimit(key, max = 20, windowMs = 60000) {
   const now = Date.now();
   const rec = rlMap.get(key) || { count: 0, ts: now };
   if (now - rec.ts > windowMs) { rec.count = 0; rec.ts = now; }
@@ -466,7 +497,7 @@ const UI = {
   header: (lang='pt') => {
     const subtitle = lang === 'en' ? 'Premium License Engine' : 'Motor de Licenças Premium';
     return `<b>⌬ ───────────────────── ⌬</b>\n` +
-           `<b>◈  MOZLINCE NEBULA  v8.3.4</b>\n` +
+           `<b>◈  MOZLINCE NEBULA  v8.4.0</b>\n` +
            `<i>${subtitle} · Asheo Systems</i>\n` +
            `<b>⌬ ───────────────────── ⌬</b>`;
   },
@@ -514,7 +545,6 @@ async function handleCallback(cb) {
   try {
     if (data === 'm_home') { await tgAnswer(cb.id); return cmdStart(chatId, msgId); }
 
-    /* ── DM — LISTA ── */
     if (data === 'm_dm') {
       await tgAnswer(cb.id, '✉');
       const users = await listarUsuarios();
@@ -532,7 +562,6 @@ async function handleCallback(cb) {
     }
     if (data === 'm_dm_cancel') { DM_SESSIONS.delete(String(chatId)); await tgAnswer(cb.id, '✕'); return cmdStart(chatId, msgId); }
 
-    /* ── CONVERSAS ── */
     if (data === 'm_convs') {
       await tgAnswer(cb.id, '💬');
       const users = await listarUsuarios();
@@ -553,7 +582,6 @@ async function handleCallback(cb) {
     }
     if (data.startsWith('cvc_')) { const target = data.substring(4); await limparConversa(target); await tgAnswer(cb.id, t(lang,'conv_cleared')); return tgEdit(chatId, msgId, `✓ ${t(lang,'conv_cleared')}`, { inline_keyboard: [[{ text: t(lang,'btn_back'), callback_data:'m_convs' }]] }); }
 
-    /* ── GERAR ── */
     if (data === 'm_gerar') {
       await tgAnswer(cb.id, '⚡');
       const kb = { inline_keyboard: [] };
@@ -569,14 +597,13 @@ async function handleCallback(cb) {
       return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'gen_title')}</b>\n<code>${UI.sep}</code>\n<i>${t(lang,'gen_sub')}</i>\n\n${tabela}\n<code>${UI.sep}</code>`, kb);
     }
 
-    /* ── Gerar chave ── */
     if (data.startsWith('g_')) {
       const pk = data.substring(2), p = PACOTES[pk];
       if (!p) { await tgAnswer(cb.id, '✕'); return; }
       const chave = generateLicenseKey();
       const agora = Date.now();
       const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
-      await redisSet(chave, JSON.stringify({ chave, plano: pk, planoNome: p.nome, preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco), dias: p.dias, lifetime: p.lifetime === true, ilimitada: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, installId: null, ativadaEm: null, v: 8 }));
+      await redisSet(chave, JSON.stringify({ chave, plano: pk, planoNome: p.nome, preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco), dias: p.dias, lifetime: p.lifetime === true, ilimitada: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, installId: null, ativadaEm: null, activationCount: 0, v: 8 }));
       log('OK', `Chave ${pk} gerada: ${chave}`);
       await tgAnswer(cb.id, '✓');
       const restaTxt = p.lifetime ? '∞  LIFETIME' : humanTime(p.dias*24*60*60*1000);
@@ -584,7 +611,6 @@ async function handleCallback(cb) {
       return tgEdit(chatId, msgId, `${UI.header(lang)}\n\n<b>${t(lang,'gen_success')}</b>\n<code>${UI.sep}</code>\n\n<b>⌬  ${t(lang,'gen_key')}</b>\n<code>${chave}</code>\n\n<code>${UI.sep}</code>\n${UI.kv(p.emoji, t(lang,'gen_plan'), `<b>${p.nome}</b>`)}\n${UI.kv('◆', t(lang,'gen_price'), `<code>${precoFmt(p.preco)}</code>`)}\n${UI.kv('◔', t(lang,'gen_issued'), formatDate(agora))}\n${UI.kv('◕', t(lang,'gen_expires'), p.lifetime ? `<b>${t(lang,'gen_never')}</b>` : formatDate(expira))}\n${UI.kv('⟡', t(lang,'gen_duration'), `<b>${restaTxt}</b>`)}\n${UI.kv('∞', t(lang,'gen_lifetime'), p.lifetime ? `✓ ${t(lang,'gen_yes')}` : `✕ ${t(lang,'gen_no')}`)}\n<code>${UI.sep}</code>\n<code>${barra}</code>`, { inline_keyboard: [[{ text: t(lang,'btn_query'), callback_data:`c_${chave}` }],[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] });
     }
 
-    /* ── LISTAR ── */
     if (data === 'm_listar') {
       await tgAnswer(cb.id, '◈');
       const keys = await redisKeys('ASHEO-*');
@@ -603,7 +629,6 @@ async function handleCallback(cb) {
       return tgEdit(chatId, msgId, txt, { inline_keyboard: inlineKb });
     }
 
-    /* ── STATS ── */
     if (data === 'm_stats') {
       await tgAnswer(cb.id, '◧');
       const keys = await redisKeys('ASHEO-*');
@@ -632,7 +657,6 @@ async function handleCallback(cb) {
     if (data === 'confirm_ativas') { await tgAnswer(cb.id, '…'); const keys = await redisKeys('ASHEO-*'); let n = 0; for (const k of keys) { const l = await redisGet(k); if (l && l.ativa) { await redisDel(k); n++; } } return tgEdit(chatId, msgId, `✓  <b>${t(lang,'danger_done',{n})}</b>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); }
     if (data === 'confirm_tudo') { await tgAnswer(cb.id, '💣'); const keys = await redisKeys('ASHEO-*'); for (const k of keys) await redisDel(k); return tgEdit(chatId, msgId, `💣  <b>${t(lang,'danger_done',{n:keys.length})}</b>`, { inline_keyboard: [[{ text: t(lang,'btn_menu'), callback_data:'m_home' }]] }); }
 
-    /* ── DETALHES ── */
     if (data.startsWith('c_')) {
       const k = data.substring(2), l = await redisGet(k);
       if (!l) { await tgAnswer(cb.id, '✕'); return; }
@@ -663,7 +687,6 @@ async function handleMessage(msg) {
   const lang = USER_LANG.get(String(chatId)) || 'pt';
   registrarUsuario(msg.from, chatId).catch(()=>{});
 
-  /* ── Sessão DM ── */
   const dmSess = DM_SESSIONS.get(String(chatId));
   if (dmSess && dmSess.step === 'await_msg' && isOwner && texto) {
     DM_SESSIONS.delete(String(chatId));
@@ -676,7 +699,6 @@ async function handleMessage(msg) {
     return;
   }
 
-  /* ── Sessão suporte ── */
   const sessao = SUPPORT_SESSIONS.get(String(chatId));
   if (sessao && sessao.step === 'waiting') {
     if (cmd === '/cancelar' || cmd === '/cancel' || cmd === 'cancelar' || cmd === 'cancel') { SUPPORT_SESSIONS.delete(String(chatId)); await tgSend(chatId, `<b>${t(lang,'support_cancelled')}</b>\n\nUse /start.`); return; }
@@ -692,7 +714,6 @@ async function handleMessage(msg) {
     return;
   }
 
-  /* ── Não-owner ── */
   if (!isOwner) {
     if (cmd === '/start' || cmd === '/contacto' || cmd === '/contact' || cmd === '/ajuda' || cmd === '/help' || cmd === '/lang') {
       if (cmd === '/lang') { await tgSend(chatId, `<b>◐  ${t(lang,'lang_select')}</b>`, { inline_keyboard: [[{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]] }); return; }
@@ -706,7 +727,6 @@ async function handleMessage(msg) {
     return;
   }
 
-  /* ═══════ OWNER ═══════ */
   try {
     if (cmd === '/start' || cmd === '/menu') { await cmdStart(chatId); return; }
     if (cmd === '/lang') { await tgSend(chatId, `<b>◐  ${t(lang,'lang_select')}</b>`, { inline_keyboard: [[{ text:'▸ Português (BR)', callback_data:'lang_pt' }, { text:'▸ English (US)', callback_data:'lang_en' }]] }); return; }
@@ -763,7 +783,7 @@ async function handleMessage(msg) {
     if (cmd === '/gerar') { const kb = { inline_keyboard: [] }; const entries = Object.entries(PACOTES); for (let i = 0; i < entries.length; i += 2) { const linha = [{ text: `${entries[i][1].emoji} ${entries[i][1].nome} · ${precoFmt(entries[i][1].preco)}`, callback_data:`g_${entries[i][0]}` }]; if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` }); kb.inline_keyboard.push(linha); } await tgSend(chatId, `<b>⚡  ${t(lang,'gen_title')}</b>`, kb); return; }
     if (cmd === '/listar') { const keys = await redisKeys('ASHEO-*'); if (keys.length === 0) { await tgSend(chatId, `<i>${t(lang,'list_empty')}</i>`); return; } let txt = `<b>${t(lang,'list_title')} (${keys.length})</b>\n<code>${UI.sep}</code>\n`; for (let i = 0; i < Math.min(keys.length, 30); i++) { const l = await redisGet(keys[i]); if (!l) continue; const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now()); const emoji = l.lifetime ? '∞' : (l.ativa ? '●' : '○'); txt += `<b>${emoji}</b> <code>${keys[i]}</code>\n   <i>${l.planoNome} · ${exp}</i>\n`; } await tgSend(chatId, txt); return; }
     if (cmd === '/status') { const k = args[1]; if (!k) { await tgSend(chatId, `/status &lt;chave&gt;`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; } const resta = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now()); const pk = PACOTES[l.plano] || { emoji:'◆' }; await tgSend(chatId, `<b>◉  ${t(lang,'detail_title')}</b>\n<code>${UI.sep}</code>\n<b>⌬  ${t(lang,'detail_key')}:</b> <code>${k}</code>\n<b>${pk.emoji}  ${t(lang,'gen_plan')}:</b> ${l.planoNome}\n<b>◆  ${t(lang,'gen_price')}:</b> ${precoFmt(l.preco)}\n<b>◔  ${t(lang,'gen_issued')}:</b> ${formatDate(l.criadaEm)}\n<b>◕  ${t(lang,'gen_expires')}:</b> ${l.lifetime?t(lang,'gen_never'):formatDate(l.expiraEm)}\n<b>⟡  ${t(lang,'detail_remaining')}:</b> ${resta}\n<b>∞  ${t(lang,'gen_lifetime')}:</b> ${l.lifetime?'✓':'✕'}\n<b>◉  ${t(lang,'detail_status')}:</b> ${l.ativa?t(lang,'detail_active'):t(lang,'detail_revoked')}`); return; }
-    if (cmd === '/activate') { const chave = args[args.length-1], installId = args.slice(1, args.length-1).join(' '); if (!installId || !chave) { await tgSend(chatId, `/activate &lt;id&gt; &lt;chave&gt;`); return; } const l = await redisGet(chave); if (!l) { await tgSend(chatId, `✕  Inválida`); return; } if (l.installId) { await tgSend(chatId, `⚠  Já vinculada`); return; } l.installId = installId; l.ativadaEm = Date.now(); await redisSet(chave, JSON.stringify(l)); await tgSend(chatId, `✓  Vinculada!\n⌬ <code>${chave}</code>\n⟡ <code>${installId}</code>`); return; }
+    if (cmd === '/activate') { const chave = args[args.length-1], installId = args.slice(1, args.length-1).join(' '); if (!installId || !chave) { await tgSend(chatId, `/activate &lt;id&gt; &lt;chave&gt;`); return; } const l = await redisGet(chave); if (!l) { await tgSend(chatId, `✕  Inválida`); return; } if (l.installId) { await tgSend(chatId, `⚠  Já vinculada`); return; } l.installId = installId; l.ativadaEm = Date.now(); l.activationCount = (l.activationCount||0)+1; await redisSet(chave, JSON.stringify(l)); await tgSend(chatId, `✓  Vinculada!\n⌬ <code>${chave}</code>\n⟡ <code>${installId}</code>`); return; }
     if (cmd === '/desvincular') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕`); return; } l.installId = null; l.ativadaEm = null; await redisSet(k, JSON.stringify(l)); await tgSend(chatId, `⌬  Desvinculada`); return; }
     if (cmd === '/revogar') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕`); return; } l.ativa = false; await redisSet(k, JSON.stringify(l)); await tgSend(chatId, `✕  Revogada`); return; }
     if (cmd === '/deletar') { const k = args[1]; if (!k) { await tgSend(chatId, `⚠  <code>/deletar &lt;chave&gt;</code>`); return; } const l = await redisGet(k); if (!l) { await tgSend(chatId, `✕  Não encontrada`); return; } await redisDel(k); await tgSend(chatId, `✕  Deletada: <code>${k}</code>`); return; }
@@ -778,38 +798,41 @@ app.post('/telegram-webhook', async (req, res) => { res.sendStatus(200); const u
 /* ═══════════════════════════════════════════════
    ◈ HEALTH · VERSION · STATUS
    ═══════════════════════════════════════════════ */
-const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.3.4',codename:'Apocalypse',timestamp:new Date().toISOString()});
-app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3.4',status:'live'}));
+const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.4.0',codename:'Quantum',timestamp:new Date().toISOString()});
+app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.0',status:'live'}));
 app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
-const versionHandler = (req,res)=>res.json({ok:true,version:'8.3.4',codename:'Apocalypse',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
+const versionHandler = (req,res)=>res.json({ok:true,version:'8.4.0',codename:'Quantum',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
 app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
-const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.3.4',hora:new Date().toISOString()});
+const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.0',hora:new Date().toISOString()});
 app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
 
 /* ═══════════════════════════════════════════════
-   ◈ BOOTSTRAP · RULES · GATEWAYS · CAMPAIGN
+   ◈ BOOTSTRAP — formato Asheo com encPack + k + rules plain
    ═══════════════════════════════════════════════ */
 function bootstrapHandler(req,res){
   const auth = validateBearer(req);
   const installId = req.headers['x-asheo-install'] || req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
-  const prov = generateProv(installId);
-  const packKey = Buffer.from(deriveKey(installId)).toString('base64');
-  const encPack = encryptPack({ rules: PAYMENT_RULES, version: RULES_VERSION }, installId);
+  const licenseKey = auth.ok ? (auth.decoded.licenseKey || '') : '';
+  const kid = licenseKey ? buildKid(licenseKey) : 'ASHEO-FREEREF';
+  const prov = generateProv(installId, kid);
+  const secretHex = buildSecret(installId, licenseKey || 'guest');
+  const packKey = Buffer.from(secretHex, 'hex').toString('base64');
+  const encPack = encryptPack({ rules: PAYMENT_RULES, version: RULES_VERSION }, installId, licenseKey);
   res.setHeader('x-asheo-pack-fmt', 'enc');
-  log('BOOT', `Bootstrap auth=${auth.ok} installId=${String(installId).substring(0,12)}... prov=${prov?'ok':'x'}`);
+  log('BOOT', `Bootstrap auth=${auth.ok} installId=${String(installId).substring(0,12)}… prov=${prov?'ok':'x'} pack=${encPack.ct.length}b kid=${kid}`);
   res.json({
-    ok:true, version:'8.3.4', codename:'Apocalypse', apiVersion:'v1',
+    ok:true, version:'8.4.0', codename:'Quantum', apiVersion:'v1',
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:'premium', sourceType:'server', isFounder:true, tier:'premium', kind:'premium',
-    rulesVersion: RULES_VERSION,
-    encPack: encPack,
-    k: packKey,
-    _prov: prov,
-    config:{apiBase:'https://mozlince.onrender.com',featuresEnabled:true,premiumEnabled:true,syncEnabled:true,gatewayMode:'default',telemetryEnabled:false,retryAfterMs:5000,heartbeatMs:60000},
-    flags:{bootstrapReady:true,exclusiveEnabled:true,rulesEnabled:true,premium:true},
+    rulesVersion: RULES_VERSION, v: RULES_VERSION,
+    encPack: encPack, k: packKey, _prov: prov,
+    rules: PAYMENT_RULES, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES,
+    exclusive: { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov },
+    config:{ apiBase:'https://mozlince.onrender.com', featuresEnabled:true, premiumEnabled:true, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 },
+    flags:{ bootstrapReady:true, exclusiveEnabled:true, rulesEnabled:true, premium:true },
     endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check' },
-    features:mapFeatures(true),capabilities:mapCapabilities(true),
-    limits:{...PREMIUM_LIMITS},scope:PREMIUM_SCOPE
+    features:mapFeatures(true), capabilities:mapCapabilities(true),
+    limits:{...PREMIUM_LIMITS}, scope:PREMIUM_SCOPE
   });
 }
 app.get('/v1/bootstrap',bootstrapHandler); app.get('/api/v1/bootstrap',bootstrapHandler);
@@ -817,23 +840,44 @@ app.get('/v1/bootstrap',bootstrapHandler); app.get('/api/v1/bootstrap',bootstrap
 function mapFeatures(on) { const o={}; FEATURE_KEYS.forEach(k=>o[k]=!!on); return o; }
 function mapCapabilities(on) { const o={}; CAPABILITY_KEYS.forEach(k=>o[k]=!!on); return o; }
 
+/* ═══════════════════════════════════════════════
+   ◈ RULES — formato Asheo com envelope + pack
+   ═══════════════════════════════════════════════ */
 function rulesHandler(req,res){
   const auth = validateBearer(req);
   const installId = req.headers['x-asheo-install'] || req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
-  const prov = generateProv(installId);
+  const licenseKey = auth.ok ? (auth.decoded.licenseKey || '') : '';
+  const kid = licenseKey ? buildKid(licenseKey) : 'ASHEO-FREEREF';
+  const prov = generateProv(installId, kid);
   const packFmt = (req.headers['x-asheo-pack-fmt'] || '').toLowerCase();
+  const secretHex = buildSecret(installId, licenseKey || 'guest');
+  const packKey = Buffer.from(secretHex, 'hex').toString('base64');
+  const encPack = encryptPack({ rules: PAYMENT_RULES, version: RULES_VERSION }, installId, licenseKey);
+
   if (packFmt === 'enc') {
-    const packKey = Buffer.from(deriveKey(installId)).toString('base64');
-    const encPack = encryptPack({ rules: PAYMENT_RULES, version: RULES_VERSION }, installId);
     res.setHeader('x-asheo-pack-fmt', 'enc');
-    log('RULES', `/v1/rules enc mode - ${String(installId).substring(0,12)}...`);
-    return res.json({ ok:true, version: RULES_VERSION, pack:{ encPack }, k: packKey, _prov: prov, serverTime:Date.now() });
+    log('RULES', `/v1/rules enc ${String(installId).substring(0,12)}… ${encPack.ct.length}b`);
+    return res.json({ ok:true, version: RULES_VERSION, v: RULES_VERSION, pack: { encPack }, k: packKey, _prov: prov, serverTime: Date.now() });
   }
-  res.json({ ok:true, version: RULES_VERSION, updatedAt:new Date().toISOString(), source:'premium', tier:'premium', scope: PREMIUM_SCOPE, count: PAYMENT_RULES.length, rules: PAYMENT_RULES, _prov: prov, serverTime:Date.now() });
+  res.json({
+    ok:true, version: RULES_VERSION, v: RULES_VERSION,
+    updatedAt:new Date().toISOString(), source:'premium', tier:'premium',
+    scope: PREMIUM_SCOPE, count: PAYMENT_RULES.length,
+    rules: PAYMENT_RULES, gateways: PAYMENT_RULES,
+    pack: { encPack }, k: packKey, _prov: prov,
+    serverTime: Date.now()
+  });
 }
 app.get('/v1/rules',rulesHandler); app.get('/api/v1/rules',rulesHandler); app.get('/v1/rules/sync',rulesHandler); app.get('/api/v1/sync',rulesHandler);
 
-function gatewaysHandler(req,res){ const auth = validateBearer(req); const installId = req.headers['x-asheo-install'] || req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default'); const prov = generateProv(installId); res.json({ ok:true, source:'premium', tier:'premium', version: RULES_VERSION, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES, gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() }); }
+function gatewaysHandler(req,res){
+  const auth = validateBearer(req);
+  const installId = req.headers['x-asheo-install'] || req.headers['x-install-id'] || (auth.ok ? auth.decoded.sub : 'default');
+  const licenseKey = auth.ok ? (auth.decoded.licenseKey || '') : '';
+  const kid = licenseKey ? buildKid(licenseKey) : 'ASHEO-FREEREF';
+  const prov = generateProv(installId, kid);
+  res.json({ ok:true, source:'premium', tier:'premium', version: RULES_VERSION, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES, gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() });
+}
 app.get('/v1/gateways',gatewaysHandler); app.get('/api/v1/gateways',gatewaysHandler);
 
 async function campaignHandler(req,res){ const camp = await redisGetRaw('ASHEO-CAMPAIGN-ACTIVE'); res.json({ ok:true, campaign: camp || null, serverTime:Date.now() }); }
@@ -842,14 +886,45 @@ app.get('/v1/campaign',campaignHandler); app.get('/api/v1/campaign',campaignHand
 function exclusiveHandler(req,res){
   const auth = validateBearer(req);
   const installId = req.headers['x-asheo-install'] || (auth.ok ? auth.decoded.sub : 'default');
-  const prov = generateProv(installId);
-  res.json({ ok:true, source:'premium', tier:'premium', manifest:{ version:'1.7.0', version_name:'1.7.0', generatedAt:new Date().toISOString(), minVersion:'1.0.0', exclusiveFeatures: FEATURE_KEYS, rules: PAYMENT_RULES, gateways: GATEWAYS_META, signature: prov }, _prov: prov, cachedAt:Date.now(), expiresAt:Date.now()+(23*3600*1000) });
+  const licenseKey = auth.ok ? (auth.decoded.licenseKey || '') : '';
+  const kid = licenseKey ? buildKid(licenseKey) : 'ASHEO-FREEREF';
+  const prov = generateProv(installId, kid);
+  res.json({
+    ok:true, source:'premium', tier:'premium',
+    manifest:{
+      version:'1.7.0', version_name:'1.7.0', generatedAt:new Date().toISOString(), minVersion:'1.0.0',
+      exclusiveFeatures: FEATURE_KEYS,
+      rules: PAYMENT_RULES,
+      targets: EXCLUSIVE_TARGETS,
+      gateways: GATEWAYS_META,
+      signature: prov
+    },
+    _prov: prov,
+    cachedAt:Date.now(),
+    expiresAt:Date.now()+(23*3600*1000)
+  });
 }
 app.get('/v1/exclusive/manifest',exclusiveHandler); app.get('/api/v1/manifest',exclusiveHandler);
-function exclusiveSyncHandler(req,res){ const auth = validateBearer(req); const installId = req.headers['x-asheo-install'] || (auth.ok ? auth.decoded.sub : 'default'); const prov = generateProv(installId); res.json({ ok:true, source:'premium', tier:'premium', manifest:{ version:'1.7.0', generatedAt:new Date().toISOString(), rules: PAYMENT_RULES, gateways: GATEWAYS_META, signature: prov }, _prov: prov, cachedAt:Date.now() }); }
+function exclusiveSyncHandler(req,res){
+  const auth = validateBearer(req);
+  const installId = req.headers['x-asheo-install'] || (auth.ok ? auth.decoded.sub : 'default');
+  const licenseKey = auth.ok ? (auth.decoded.licenseKey || '') : '';
+  const kid = licenseKey ? buildKid(licenseKey) : 'ASHEO-FREEREF';
+  const prov = generateProv(installId, kid);
+  res.json({
+    ok:true, source:'premium', tier:'premium',
+    manifest:{
+      version:'1.7.0', generatedAt:new Date().toISOString(),
+      rules: PAYMENT_RULES,
+      targets: EXCLUSIVE_TARGETS,
+      gateways: GATEWAYS_META,
+      signature: prov
+    },
+    _prov: prov, cachedAt:Date.now()
+  });
+}
 app.get('/v1/exclusive/sync',exclusiveSyncHandler); app.get('/api/v1/exclusive/sync',exclusiveSyncHandler);
 
-/* ── NOVOS: timehw · update/check ── */
 app.get('/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
 app.get('/api/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
 app.get('/v1/update/check', (req,res) => res.json({ ok:true, available:false, dismissedVersion:'', error:'', lastCheck:Date.now(), latest:{ downloadUrl:'https://download.asheobypasser.net/get', mandatory:false, notes:'Voce esta na versao mais recente.' } }));
@@ -861,9 +936,9 @@ app.get('/v1/dashboard',dashboardHandler); app.get('/api/v1/dashboard',dashboard
 function entitlementHandler(req,res){ const auth = validateBearer(req); if (!auth.ok) return res.status(401).json({ok:false,error:'missing_bearer'}); const ent = buildEntitlement({ ativa:true, plano:'premium', lifetime:true, expiraEm: Date.now()+9999999, criadaEm: Date.now() }, auth.decoded.sub, 1); res.json({ ok:true, source:'premium', sourceType:'server', isFounder:false, tier:ent.tier, kind:'premium', active:true, isPremium:true, isVerified:true, installId:auth.decoded.sub, plan:ent.plan, planDisplayName:ent.planDisplayName, lifetime: auth.decoded.lifetime === true, licenseKey: auth.decoded.licenseKey, issuedAt: auth.decoded.issuedAt, expiresAt: auth.decoded.expiresAt, scope:PREMIUM_SCOPE, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, exp: auth.decoded.exp*1000, serverTime:Date.now() }); }
 app.get('/v1/entitlement',entitlementHandler); app.get('/api/v1/entitlement',entitlementHandler);
 
-function premiumDefHandler(req,res){ res.json({ ok:true, source:'premium', tier:'premium', features: PREMIUM_FEATURES_DEF, capabilities: PREMIUM_CAPABILITIES_DEF, premiumLimits: PREMIUM_LIMITS, freeLimits: FREE_LIMITS, scope: PREMIUM_SCOPE, version:'8.3.4' }); }
 const PREMIUM_FEATURES_DEF = { browser_mods:{enabled:true,label:'Browser Mods'}, rule_ops_lab:{enabled:true,label:'Rule Ops Lab'}, live_injection_hud:{enabled:true,label:'Live Injection HUD'}, algo_v2:{enabled:true,label:'Algo V2'}, exclusive_rules:{enabled:true,label:'Exclusive Rules'}, advanced_automation:{enabled:true,label:'Advanced Automation'}, multi_account:{enabled:true,label:'Multi Account'}, custom_export:{enabled:true,label:'Custom Export'}, api_access:{enabled:true,label:'API Access'} };
 const PREMIUM_CAPABILITIES_DEF = { priority_support:{enabled:true,label:'Priority Support'}, custom_webhooks:{enabled:true,label:'Custom Webhooks'}, cloud_sync:{enabled:true,label:'Cloud Sync'}, bulk_actions:{enabled:true,label:'Bulk Actions'}, advanced_analytics:{enabled:true,label:'Advanced Analytics'} };
+function premiumDefHandler(req,res){ res.json({ ok:true, source:'premium', tier:'premium', features: PREMIUM_FEATURES_DEF, capabilities: PREMIUM_CAPABILITIES_DEF, premiumLimits: PREMIUM_LIMITS, freeLimits: FREE_LIMITS, scope: PREMIUM_SCOPE, version:'8.4.0' }); }
 app.get('/v1/premium/definitions',premiumDefHandler); app.get('/api/v1/premium/definitions',premiumDefHandler);
 
 function planosHandler(req,res){ res.json({ ok:true, currency:'USD', planos: Object.entries(PACOTES).map(([id,p])=>({ id, nome:p.nome, dias:p.dias, lifetime:p.lifetime, preco:p.preco, preco_fmt:precoFmt(p.preco), emoji:p.emoji })) }); }
@@ -882,7 +957,7 @@ function supportHandler(req,res){ const {chatId,message} = req.body||{}; if (!me
 app.post('/v1/support',supportHandler); app.post('/api/v1/support',supportHandler);
 
 /* ═══════════════════════════════════════════════
-   ◈ ACTIVATE — FORMATO ASHEO 100%
+   ◈ ACTIVATE — formato Asheo 100%
    ═══════════════════════════════════════════════ */
 async function activateHandler(req, res) {
   const inicio = Date.now();
@@ -906,8 +981,8 @@ async function activateHandler(req, res) {
     const secret = buildSecret(installId, 'guest');
     const exp = now + 600;
     const claims = { sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId, plan:'free', planDisplayName:'Free', tier:'free', kind:'license', status:'inactive', active:false, isPremium:false, isVerified:false, source:'free', sourceType:'server', isFounder:false, lifetime:false, scope:['free'], features: mapFeatures(false), capabilities: mapCapabilities(false), limits:{...FREE_LIMITS}, secret, iat:now, nbf:now-5, exp, jti: crypto.randomUUID() };
-    const token = signToken(claims);
-    const gwPass = buildGwPass(installId, exp);
+    const token = signToken(claims, 'ASHEO-FREEREF');
+    const gwPass = buildGwPass(installId, exp, 'ASHEO-FREEREF');
     log('ATIV', `Guest token ${String(installId).substring(0,12)}… | ${Date.now()-inicio}ms`);
     return res.json({ token, tier:'free', secret, kind:'event', seat:0, seats:1, deviceId: installId, entitlement: ent, sub: installId, kid: null, keyName: null, jti: claims.jti, iat: now, exp, gwPass });
   }
@@ -934,11 +1009,10 @@ async function activateHandler(req, res) {
     const secret = buildSecret(installId, keyNorm);
     const kid = buildKid(keyNorm);
     const licenseExpSec = isLife ? now + (100*365*24*60*60) : Math.floor(lic.expiraEm/1000);
-    /* ⚡ Token expira em 600s (como original) - força refresh */
     const exp = now + 600;
     const claims = { sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId, plan: ent.plan, planDisplayName: ent.planDisplayName, tier: ent.tier, kind: 'license', status: ent.status, active: true, isPremium: true, isVerified: true, source:'premium', sourceType:'server', isFounder: false, lifetime: isLife, plano: lic.plano, licenseKey: keyNorm, issuedAt: lic.criadaEm, expiresAt: lic.expiraEm, scope: PREMIUM_SCOPE, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, secret, iat: now, nbf: now-5, exp, jti: crypto.randomUUID() };
     const token = signToken(claims, kid);
-    const gwPass = buildGwPass(installId, exp);
+    const gwPass = buildGwPass(installId, exp, kid);
     const expiresIn = isLife ? -1 : Math.max(0, Math.floor((lic.expiraEm - Date.now())/1000));
 
     log('ATIV', `${String(installId).substring(0,12)}… | ${keyNorm.substring(0,18)}… | kid=${kid} | exp=+600s | licExpira em ${expiresIn}s | ${Date.now()-inicio}ms`);
@@ -958,19 +1032,18 @@ async function activateHandler(req, res) {
 app.post('/v1/activate', activateHandler); app.post('/api/v1/activate', activateHandler); app.post('/api/v1/license/activate', activateHandler);
 
 /* ═══════════════════════════════════════════════
-   ◈ FEATURE ACTIVATE — formato Asheo (nonce + feature + expiresAt)
+   ◈ FEATURE ACTIVATE
    ═══════════════════════════════════════════════ */
 async function featureActivateHandler(req, res) {
   const auth = validateBearer(req);
   if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_bearer' });
   const feature = (req.body && req.body.feature) || req.query.feature;
   if (!feature) return res.status(400).json({ ok:false, error:'missing_feature' });
-  const featureKey = feature.replace(/([A-Z])/g, '_$1').toLowerCase();
-  if (!FEATURE_KEYS.includes(feature) && !PREMIUM_FEATURES_DEF[featureKey]) return res.status(404).json({ ok:false, error:'unknown_feature' });
-
+  const isKnown = FEATURE_KEYS.includes(feature) || Object.keys(PREMIUM_FEATURES_DEF).includes(feature) || Object.keys(PREMIUM_FEATURES_DEF).includes(feature.replace(/([A-Z])/g, '_$1').toLowerCase());
+  if (!isKnown) { log('WARN', `Feature desconhecida: ${feature}`); return res.status(404).json({ ok:false, error:'unknown_feature', got: feature }); }
   const now = Math.floor(Date.now()/1000);
   const exp = now + 300;
-  const nonce = jwt.sign({ sub: auth.decoded.sub, installId: auth.decoded.sub, feature, kind:'feature', type:'feature', tier:'premium', source:'premium', scope:[feature,'premium'], iat:now, nbf:now-5, exp, jti: crypto.randomUUID() }, PRIVATE_KEY, { algorithm:'ES256' });
+  const nonce = jwt.sign({ sub: auth.decoded.sub, installId: auth.decoded.sub, feature, kind:'feature', type:'feature', tier:'premium', source:'premium', scope:[feature,'premium'], iat:now, nbf:now-5, exp, jti: crypto.randomUUID() }, PRIVATE_KEY, { algorithm:'ES256', keyid: 'ASHEO-FREEREF' });
   log('FEAT', `${feature} | ${String(auth.decoded.sub).substring(0,12)}…`);
   res.json({ nonce, feature, expiresAt: exp*1000 });
 }
@@ -999,20 +1072,20 @@ app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.p
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   banner();
-  log('SYS', `Mozlince Nebula v8.3.4 Apocalypse na porta ${PORT}`);
+  log('SYS', `Mozlince Nebula v8.4.0 Quantum na porta ${PORT}`);
   log('SYS', `Chave: ${ORIGEM}`);
   log('SYS', `Redis: ${UPSTASH_URL ? 'OK' : 'FALTA'}`);
   log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA'}`);
   log('SYS', `Planos: ${Object.keys(PACOTES).length} (USD)`);
   log('RULES', `Payment Rules: ${PAYMENT_RULES.length} (v${RULES_VERSION})`);
-  log('OK', `✔ Compatibilidade Asheo 100%`);
-  log('OK', `✔ kid=ASHEO-<prefix> | exp=iat+600`);
-  log('OK', `✔ secret determinístico | gwPass alinhado`);
-  log('OK', `✔ HKDF encPack (chave determinística)`);
+  log('RULES', `Exclusive Targets: ${EXCLUSIVE_TARGETS.length}`);
+  log('OK', `✔ encPack AES-256-GCM com chave = SHA256(installId:key:asheo-secret-v1)`);
+  log('OK', `✔ kid=ASHEO-<prefix> | exp=iat+600 | secret determinístico`);
+  log('OK', `✔ /v1/rules retorna pack + rules plain (fallback)`);
+  log('OK', `✔ /v1/exclusive/manifest com targets + rules`);
   log('OK', `✔ /v1/timehw + /v1/update/check`);
   log('OK', `✔ Bot Telegram premium + DM + Suporte + /resp`);
   log('OK', `✔ Rate limit no /v1/activate`);
-  log('OK', `✔ Tradução PT/EN`);
 });
 
 process.on('uncaughtException', e => log('ERRO', 'Uncaught: ' + e.message));
