@@ -392,7 +392,7 @@ function bootstrapHandler(req,res){
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:'premium', sourceType:'server', isFounder:true, tier:'premium', kind:'premium',
     rulesVersion: RULES_VERSION, v: RULES_VERSION,
-    encPack: encPack, k: packKey, _prov: prov,
+    pack: { encPack: encPack, k: packKey }, encPack: encPack, k: packKey, _prov: prov,
     rules: PAYMENT_RULES, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES,
     exclusive: { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov },
     config:{ apiBase:'https://mozlince.onrender.com', featuresEnabled:true, premiumEnabled:true, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 },
@@ -418,7 +418,7 @@ function rulesHandler(req,res){
   if (packFmt === 'enc') {
     res.setHeader('x-asheo-pack-fmt', 'enc');
     log('RULES', `/v1/rules enc ${String(installId).substring(0,12)}… ${encPack.ct.length}b`);
-    return sendMaybeGzip(req, res, { ok:true, version: RULES_VERSION, v: RULES_VERSION, pack: { encPack }, k: packKey, _prov: prov, serverTime: Date.now() });
+    return sendMaybeGzip(req, res, { ok:true, version: RULES_VERSION, v: RULES_VERSION, pack: { encPack: encPack, k: packKey }, k: packKey, _prov: prov, serverTime: Date.now() });
   }
   sendMaybeGzip(req, res, {
     ok:true, version: RULES_VERSION, v: RULES_VERSION,
