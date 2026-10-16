@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════
-   ✦ MOZLINCE NEBULA  ·  v8.4.0 QUANTUM
+   ✦ MOZLINCE NEBULA  ·  v8.4.1 QUANTUM
    © Asheo Systems · Premium License Engine
    ───────────────────────────────────────────────────────────────
-   ◈ v8.4.0 — Compatibilidade TOTAL com extensão original Asheo
+   ◈ v8.4.1 — Compatibilidade TOTAL com extensão original Asheo
      ▸ encPack AES-256-GCM com chave = SHA256(installId:key:asheo-secret-v1)
      ▸ kid=ASHEO-<prefix> | exp=iat+600 | secret determinístico
      ▸ Rules v33 (46 gateways) | envelope.v1 + pack.v1
@@ -37,7 +37,7 @@ const TAGS = { INFO:C.cyanB, OK:C.green, WARN:C.amber, ERRO:C.red, SYS:C.violetB
 function log(t, m) { const ts = new Date().toISOString().replace('T',' ').substring(0,19); const tag = (TAGS[t]||C.gray) + C.b + '▸ ' + t.padEnd(7) + C.r; console.log(`${C.dim}${ts}${C.r} ${tag} ${m}`); }
 function banner() {
   console.log(`\n${C.violet}   ╭──────────────────────────────────────────────╮${C.r}`);
-  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.4.0${C.r} ${C.dim}QUANTUM${C.r}  ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.4.1${C.r} ${C.dim}QUANTUM${C.r}  ${C.violet}│${C.r}`);
   console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · Asheo Systems${C.r}     ${C.violet}│${C.r}`);
   console.log(`${C.violet}   ╰──────────────────────────────────────────────╯${C.r}\n`);
 }
@@ -497,7 +497,7 @@ const UI = {
   header: (lang='pt') => {
     const subtitle = lang === 'en' ? 'Premium License Engine' : 'Motor de Licenças Premium';
     return `<b>⌬ ───────────────────── ⌬</b>\n` +
-           `<b>◈  MOZLINCE NEBULA  v8.4.0</b>\n` +
+           `<b>◈  MOZLINCE NEBULA  v8.4.1</b>\n` +
            `<i>${subtitle} · Asheo Systems</i>\n` +
            `<b>⌬ ───────────────────── ⌬</b>`;
   },
@@ -798,10 +798,10 @@ app.post('/telegram-webhook', async (req, res) => { res.sendStatus(200); const u
 /* ═══════════════════════════════════════════════
    ◈ HEALTH · VERSION · STATUS
    ═══════════════════════════════════════════════ */
-const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.4.0',codename:'Quantum',timestamp:new Date().toISOString()});
+const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.4.0',codename:'Quantum+',timestamp:new Date().toISOString()});
 app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.0',status:'live'}));
 app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
-const versionHandler = (req,res)=>res.json({ok:true,version:'8.4.0',codename:'Quantum',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
+const versionHandler = (req,res)=>res.json({ok:true,version:'8.4.0',codename:'Quantum+',api:'v1',minClientVersion:'1.0.0',timestamp:new Date().toISOString()});
 app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
 const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.0',hora:new Date().toISOString()});
 app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
@@ -821,7 +821,7 @@ function bootstrapHandler(req,res){
   res.setHeader('x-asheo-pack-fmt', 'enc');
   log('BOOT', `Bootstrap auth=${auth.ok} installId=${String(installId).substring(0,12)}… prov=${prov?'ok':'x'} pack=${encPack.ct.length}b kid=${kid}`);
   res.json({
-    ok:true, version:'8.4.0', codename:'Quantum', apiVersion:'v1',
+    ok:true, version:'8.4.0', codename:'Quantum+', apiVersion:'v1',
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:'premium', sourceType:'server', isFounder:true, tier:'premium', kind:'premium',
     rulesVersion: RULES_VERSION, v: RULES_VERSION,
@@ -1072,7 +1072,7 @@ app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.p
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   banner();
-  log('SYS', `Mozlince Nebula v8.4.0 Quantum na porta ${PORT}`);
+  log('SYS', `Mozlince Nebula v8.4.1 Quantum na porta ${PORT}`);
   log('SYS', `Chave: ${ORIGEM}`);
   log('SYS', `Redis: ${UPSTASH_URL ? 'OK' : 'FALTA'}`);
   log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA'}`);
