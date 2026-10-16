@@ -287,7 +287,7 @@ function generateProv(installId, kid) {
 function buildGwPass(installId, expSec, kid) {
   if (!PRIVATE_KEY) return null;
   const now = Math.floor(Date.now()/1000);
-  const exp = expSec || (now + 600);
+  const exp = expSec || (now + 82800);
   const opts = { algorithm:'ES256' };
   if (kid) opts.keyid = kid;
   return jwt.sign({ sub: installId, purpose:'gw-pass', iat: now, exp, jti: crypto.randomUUID() }, PRIVATE_KEY, opts);
@@ -983,7 +983,7 @@ async function activateHandler(req, res) {
     const now = Math.floor(Date.now()/1000);
     const ent = buildEntitlement(null, installId, 0);
     const secret = buildSecret(installId, 'guest');
-    const exp = now + 600;
+    const exp = now + 82800;
     const claims = { sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId, plan:'free', planDisplayName:'Free', tier:'free', kind:'license', status:'inactive', active:false, isPremium:false, isVerified:false, source:'free', sourceType:'server', isFounder:false, lifetime:false, scope:['free'], features: mapFeatures(false), capabilities: mapCapabilities(false), limits:{...FREE_LIMITS}, secret, iat:now, nbf:now-5, exp, jti: crypto.randomUUID() };
     const token = signToken(claims, 'ASHEO-FREEREF');
     const gwPass = buildGwPass(installId, exp, 'ASHEO-FREEREF');
@@ -1005,7 +1005,7 @@ async function activateHandler(req, res) {
     const isLife = lic.plano === 'life';
     const secret = buildSecret(installId, keyNorm);
     const kid = buildKid(keyNorm);
-    const exp = now + 600;
+    const exp = now + 82800;
     const claims = { sub: installId, iss: 'asheo.api', aud: 'mozlince-client', installId, plan: ent.plan, planDisplayName: ent.planDisplayName, tier: ent.tier, kind: 'license', status: ent.status, active: true, isPremium: true, isVerified: true, source:'premium', sourceType:'server', isFounder: false, lifetime: isLife, plano: lic.plano, licenseKey: keyNorm, issuedAt: lic.criadaEm, expiresAt: lic.expiraEm, scope: PREMIUM_SCOPE, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, secret, iat: now, nbf: now-5, exp, jti: crypto.randomUUID() };
     const token = signToken(claims, kid);
     const gwPass = buildGwPass(installId, exp, kid);
