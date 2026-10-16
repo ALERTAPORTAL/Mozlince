@@ -369,7 +369,7 @@ function isAllowed3dsTarget(targetUrl) {
    ═══════════════════════════════════════════════ */
 const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.4.1',codename:'Quantum+',timestamp:new Date().toISOString()});
 app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.1',codename:'Quantum+',status:'live'}));
-app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
+app.all('/v1/health',healthHandler); app.all('/api/v1/health',healthHandler); app.all('/health',healthHandler);
 
 function versionHandler(req,res){
   res.json({
@@ -381,10 +381,10 @@ function versionHandler(req,res){
     timestamp:new Date().toISOString()
   });
 }
-app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
+app.all('/v1/version',versionHandler); app.all('/api/v1/version',versionHandler);
 
 const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.1',codename:'Quantum+',hora:new Date().toISOString()});
-app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
+app.all('/v1/status',statusHandler); app.all('/api/v1/status',statusHandler);
 
 /* ═══ MAP FUNCTIONS ═══ */
 function mapFeatures(on) { const o={}; FEATURE_KEYS.forEach(k=>o[k]=!!on); return o; }
@@ -417,7 +417,7 @@ function bootstrapHandler(req,res){
     limits:{...PREMIUM_LIMITS}, scope:PREMIUM_SCOPE
   });
 }
-app.get('/v1/bootstrap',bootstrapHandler); app.get('/api/v1/bootstrap',bootstrapHandler);
+app.all('/v1/bootstrap',bootstrapHandler); app.all('/api/v1/bootstrap',bootstrapHandler);
 
 /* ═══ RULES ═══ */
 function rulesHandler(req,res){
@@ -444,7 +444,7 @@ function rulesHandler(req,res){
     serverTime: Date.now()
   });
 }
-app.get('/v1/rules',rulesHandler); app.get('/api/v1/rules',rulesHandler); app.get('/v1/rules/sync',rulesHandler); app.get('/api/v1/sync',rulesHandler);
+app.all('/v1/rules',rulesHandler); app.all('/api/v1/rules',rulesHandler); app.all('/v1/rules/sync',rulesHandler); app.all('/api/v1/sync',rulesHandler);
 
 function gatewaysHandler(req,res){
   const auth = validateAnyAuth(req);
@@ -454,10 +454,10 @@ function gatewaysHandler(req,res){
   const prov = generateProv(installId, kid);
   sendMaybeGzip(req, res, { ok:true, source:'premium', tier:'premium', version: RULES_VERSION, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES, gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() });
 }
-app.get('/v1/gateways',gatewaysHandler); app.get('/api/v1/gateways',gatewaysHandler);
+app.all('/v1/gateways',gatewaysHandler); app.all('/api/v1/gateways',gatewaysHandler);
 
 async function campaignHandler(req,res){ const camp = await redisGetRaw('ASHEO-CAMPAIGN-ACTIVE'); sendMaybeGzip(req, res, { ok:true, campaign: camp || null, serverTime:Date.now() }); }
-app.get('/v1/campaign',campaignHandler); app.get('/api/v1/campaign',campaignHandler);
+app.all('/v1/campaign',campaignHandler); app.all('/api/v1/campaign',campaignHandler);
 
 /* ═══ EXCLUSIVE MANIFEST ═══ */
 function exclusiveHandler(req,res){
@@ -479,7 +479,7 @@ function exclusiveHandler(req,res){
     _prov: prov, cachedAt:Date.now(), expiresAt:Date.now()+(23*3600*1000)
   });
 }
-app.get('/v1/exclusive/manifest',exclusiveHandler); app.get('/api/v1/manifest',exclusiveHandler);
+app.all('/v1/exclusive/manifest',exclusiveHandler); app.all('/api/v1/manifest',exclusiveHandler);
 
 function exclusiveSyncHandler(req,res){
   const auth = validateAnyAuth(req);
@@ -497,13 +497,13 @@ function exclusiveSyncHandler(req,res){
     _prov: prov, cachedAt:Date.now()
   });
 }
-app.get('/v1/exclusive/sync',exclusiveSyncHandler); app.get('/api/v1/exclusive/sync',exclusiveSyncHandler);
+app.all('/v1/exclusive/sync',exclusiveSyncHandler); app.all('/api/v1/exclusive/sync',exclusiveSyncHandler);
 
 /* ═══ TIME · UPDATE ═══ */
-app.get('/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
-app.get('/api/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
-app.get('/v1/update/check', (req,res) => res.json({ ok:true, available:false, dismissedVersion:'', error:'', lastCheck:Date.now(), latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.4.1', mandatory:false, notes:'Voce esta na versao mais recente.' } }));
-app.get('/api/v1/update/check', (req,res) => res.json({ ok:true, available:false, latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.4.1', mandatory:false, notes:'OK' } }));
+app.all('/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
+app.all('/api/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
+app.all('/v1/update/check', (req,res) => res.json({ ok:true, available:false, dismissedVersion:'', error:'', lastCheck:Date.now(), latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.4.1', mandatory:false, notes:'Voce esta na versao mais recente.' } }));
+app.all('/api/v1/update/check', (req,res) => res.json({ ok:true, available:false, latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.4.1', mandatory:false, notes:'OK' } }));
 
 /* ═══ DASHBOARD · ENTITLEMENT · PREMIUM ═══ */
 function dashboardHandler(req,res){
@@ -511,7 +511,7 @@ function dashboardHandler(req,res){
   const ok = auth.ok && auth.decoded.tier === 'premium';
   res.json({ ok:true, source: ok?'premium':'free', sourceType:'server', isFounder:false, dashboard:{ tier: ok?'premium':'free', source: ok?'premium':'free', seat: auth.ok?1:0, seats: auth.ok?1:0, installId: auth.ok?auth.decoded.sub:null, expiresAt: auth.ok?auth.decoded.expiresAt:null, lifetime: auth.ok?auth.decoded.lifetime===true:false, features: ok?mapFeatures(true):mapFeatures(false), capabilities: ok?mapCapabilities(true):mapCapabilities(false), limits: ok?PREMIUM_LIMITS:FREE_LIMITS, scope: ok?PREMIUM_SCOPE:['free'] }, serverTime:Date.now() });
 }
-app.get('/v1/dashboard',dashboardHandler); app.get('/api/v1/dashboard',dashboardHandler);
+app.all('/v1/dashboard',dashboardHandler); app.all('/api/v1/dashboard',dashboardHandler);
 
 function entitlementHandler(req,res){
   const auth = validateAnyAuth(req);
@@ -519,21 +519,21 @@ function entitlementHandler(req,res){
   const ent = buildEntitlement({ ativa:true, plano:'premium', lifetime:true, expiraEm: Date.now()+9999999, criadaEm: Date.now() }, auth.decoded.sub, 1);
   res.json({ ok:true, source:'premium', sourceType:'server', isFounder:false, tier:ent.tier, kind:'premium', active:true, isPremium:true, isVerified:true, installId:auth.decoded.sub, plan:ent.plan, planDisplayName:ent.planDisplayName, lifetime: auth.decoded.lifetime === true, licenseKey: auth.decoded.licenseKey, issuedAt: auth.decoded.issuedAt, expiresAt: auth.decoded.expiresAt, scope:PREMIUM_SCOPE, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, exp: auth.decoded.exp*1000, serverTime:Date.now() });
 }
-app.get('/v1/entitlement',entitlementHandler); app.get('/api/v1/entitlement',entitlementHandler);
+app.all('/v1/entitlement',entitlementHandler); app.all('/api/v1/entitlement',entitlementHandler);
 
 const PREMIUM_FEATURES_DEF = { browser_mods:{enabled:true,label:'Browser Mods'}, rule_ops_lab:{enabled:true,label:'Rule Ops Lab'}, live_injection_hud:{enabled:true,label:'Live Injection HUD'}, algo_v2:{enabled:true,label:'Algo V2'}, exclusive_rules:{enabled:true,label:'Exclusive Rules'}, advanced_automation:{enabled:true,label:'Advanced Automation'}, multi_account:{enabled:true,label:'Multi Account'}, custom_export:{enabled:true,label:'Custom Export'}, api_access:{enabled:true,label:'API Access'} };
 const PREMIUM_CAPABILITIES_DEF = { priority_support:{enabled:true,label:'Priority Support'}, custom_webhooks:{enabled:true,label:'Custom Webhooks'}, cloud_sync:{enabled:true,label:'Cloud Sync'}, bulk_actions:{enabled:true,label:'Bulk Actions'}, advanced_analytics:{enabled:true,label:'Advanced Analytics'} };
 function premiumDefHandler(req,res){ res.json({ ok:true, source:'premium', tier:'premium', features: PREMIUM_FEATURES_DEF, capabilities: PREMIUM_CAPABILITIES_DEF, premiumLimits: PREMIUM_LIMITS, freeLimits: FREE_LIMITS, scope: PREMIUM_SCOPE, version:'8.4.1' }); }
-app.get('/v1/premium/definitions',premiumDefHandler); app.get('/api/v1/premium/definitions',premiumDefHandler);
+app.all('/v1/premium/definitions',premiumDefHandler); app.all('/api/v1/premium/definitions',premiumDefHandler);
 
 function planosHandler(req,res){ res.json({ ok:true, currency:'USD', planos: Object.entries(PACOTES).map(([id,p])=>({ id, nome:p.nome, dias:p.dias, lifetime:p.lifetime, preco:p.preco, preco_fmt:precoFmt(p.preco), emoji:p.emoji })) }); }
-app.get('/v1/planos',planosHandler); app.get('/api/v1/planos',planosHandler);
+app.all('/v1/planos',planosHandler); app.all('/api/v1/planos',planosHandler);
 
 function manifestCheckHandler(req,res){ res.json({ ok:true, latest:'1.8.0', minVersion:'1.0.0', channel: req.query.channel || 'stable', serverTime:Date.now() }); }
-app.get('/v1/manifest/check',manifestCheckHandler); app.get('/api/v1/manifest',manifestCheckHandler);
+app.all('/v1/manifest/check',manifestCheckHandler); app.all('/api/v1/manifest',manifestCheckHandler);
 
 function packsHandler(req,res){ const id = req.params.id; res.json({ ok:true, pack:{ id, version:'1.0.0', data:null, signature: crypto.randomBytes(32).toString('hex') }, serverTime:Date.now() }); }
-app.get('/v1/packs/:id',packsHandler); app.get('/api/v1/packs/:id',packsHandler);
+app.all('/v1/packs/:id',packsHandler); app.all('/api/v1/packs/:id',packsHandler);
 
 function telemetryHandler(req,res){ res.json({ ok:true, received:true, serverTime:Date.now() }); }
 app.post('/v1/telemetry',telemetryHandler); app.post('/api/v1/telemetry',telemetryHandler);
@@ -1031,8 +1031,8 @@ async function featureActivateHandler(req, res) {
   log('FEAT', `${feature} | ${String(auth.decoded.sub).substring(0,12)}…`);
   res.json({ nonce, feature, expiresAt: exp*1000, attestationOk: true });
 }
-app.post('/v1/feature/activate', featureActivateHandler); app.get('/v1/feature/activate', featureActivateHandler);
-app.post('/api/v1/feature/activate', featureActivateHandler); app.get('/api/v1/feature/activate', featureActivateHandler);
+app.post('/v1/feature/activate', featureActivateHandler); app.all('/v1/feature/activate', featureActivateHandler);
+app.post('/api/v1/feature/activate', featureActivateHandler); app.all('/api/v1/feature/activate', featureActivateHandler);
 
 /* ═══ DEACTIVATE · VERIFY · HEARTBEAT ═══ */
 async function deactivateHandler(req,res){ const {installId,licenseKey} = req.body||{}; if (licenseKey) { const lic = await redisGet(licenseKey); if (lic && lic.installId === installId) { lic.installId = null; lic.ativadaEm = null; await redisSet(licenseKey, JSON.stringify(lic)); } } res.json({ ok:true, message:'Desativado' }); }
@@ -1042,12 +1042,12 @@ function verifyHandler(req,res){ const {token} = req.body||{}; if (!token) retur
 app.post('/v1/verify',verifyHandler); app.post('/api/v1/verify',verifyHandler); app.post('/api/v1/license/verify',verifyHandler);
 
 function heartbeatHandler(req,res){ const auth = validateAnyAuth(req); if (!auth.ok) return res.status(401).json({ok:false,error:'missing_auth'}); res.json({ ok:true, alive:true, serverTime: Date.now(), expiresAt: auth.decoded.expiresAt, expiresIn: auth.decoded.expiresAt ? Math.max(0, Math.floor((auth.decoded.expiresAt - Date.now())/1000)) : -1, lifetime: auth.decoded.lifetime === true, maxServer: Date.now() }); }
-app.post('/v1/heartbeat',heartbeatHandler); app.get('/v1/heartbeat',heartbeatHandler);
-app.post('/api/v1/heartbeat',heartbeatHandler); app.get('/api/v1/heartbeat',heartbeatHandler);
+app.post('/v1/heartbeat',heartbeatHandler); app.all('/v1/heartbeat',heartbeatHandler);
+app.post('/api/v1/heartbeat',heartbeatHandler); app.all('/api/v1/heartbeat',heartbeatHandler);
 
 /* ═══ ATTEST · BUILD VERIFY ═══ */
 app.post('/v1/attest', (req, res) => { const auth = validateAnyAuth(req); const { buildDigest, files, manifestHash } = req.body || {}; log('API', `/v1/attest digest=${String(buildDigest||'').substring(0,16)||'∅'}`); res.json({ ok:true, attestationOk:true, digest: buildDigest || 'asheo-deobfuscated-v1.6.2', verified:true }); });
-app.get('/v1/attest', (req, res) => res.json({ ok:true, attestationOk:true, verified:true }));
+app.all('/v1/attest', (req, res) => res.json({ ok:true, attestationOk:true, verified:true }));
 app.post('/v1/build/verify', (req, res) => { res.json({ ok:true, valid:true, buildDigest: req.body?.buildDigest || 'asheo-deobfuscated-v1.6.2' }); });
 
 /* ═══ ENTITLEMENT REFRESH · SESSION · PREMIUM UNLOCK ═══ */
