@@ -536,10 +536,10 @@ function packsHandler(req,res){ const id = req.params.id; res.json({ ok:true, pa
 app.all('/v1/packs/:id',packsHandler); app.all('/api/v1/packs/:id',packsHandler);
 
 function telemetryHandler(req,res){ res.json({ ok:true, received:true, serverTime:Date.now() }); }
-app.post('/v1/telemetry',telemetryHandler); app.post('/api/v1/telemetry',telemetryHandler);
+app.all('/v1/telemetry',telemetryHandler); app.all('/api/v1/telemetry',telemetryHandler);
 
 function supportHandler(req,res){ const {chatId,message} = req.body||{}; if (!message) return res.status(400).json({ok:false,error:'missing_message'}); if (chatId) tgSend(OWNER_ID, `<b>✆ SUPORTE (API)</b>\n<code>${chatId}</code>\n\n${message}`); res.json({ ok:true, received:true, serverTime:Date.now() }); }
-app.post('/v1/support',supportHandler); app.post('/api/v1/support',supportHandler);
+app.all('/v1/support',supportHandler); app.all('/api/v1/support',supportHandler);
 
 /* ═══ I18N ═══ */
 const T = {
@@ -968,7 +968,7 @@ async function handleMessage(msg) {
   } catch (e) { log('ERRO', 'Message: ' + e.message); }
 }
 
-app.post('/telegram-webhook', async (req, res) => { res.sendStatus(200); const update = req.body; try { if (update.callback_query) return handleCallback(update.callback_query); if (update.message && update.message.text) return handleMessage(update.message); } catch (e) { log('ERRO', 'Webhook: ' + e.message); } });
+app.all('/telegram-webhook', async (req, res) => { res.sendStatus(200); const update = req.body; try { if (update.callback_query) return handleCallback(update.callback_query); if (update.message && update.message.text) return handleMessage(update.message); } catch (e) { log('ERRO', 'Webhook: ' + e.message); } });
 
 /* ═══ ACTIVATE ═══ */
 async function activateHandler(req, res) {
@@ -1014,7 +1014,7 @@ async function activateHandler(req, res) {
     return res.json({ token, tier: ent.tier, secret, kind:'event', seat:1, seats: ent.seatsAllowed, deviceId: installId, entitlement: ent, sub: installId, kid, keyName: null, jti: claims.jti, iat: now, exp, gwPass, expiresIn, expiresAt: lic.expiraEm, issuedAt: lic.criadaEm, licenseKey: keyNorm, welcome: { pt:'🎉 Parabéns! Licença ativada com sucesso.', en:'🎉 Congratulations! License successfully activated.' } });
   } catch (e) { log('ERRO', 'activate: ' + e.message); return res.status(500).json({ error:'internal', message: e.message }); }
 }
-app.post('/v1/activate', activateHandler); app.post('/api/v1/activate', activateHandler); app.post('/api/v1/license/activate', activateHandler);
+app.all('/v1/activate', activateHandler); app.all('/api/v1/activate', activateHandler); app.all('/api/v1/license/activate', activateHandler);
 
 /* ═══ FEATURE ACTIVATE ═══ */
 async function featureActivateHandler(req, res) {
@@ -1031,29 +1031,29 @@ async function featureActivateHandler(req, res) {
   log('FEAT', `${feature} | ${String(auth.decoded.sub).substring(0,12)}…`);
   res.json({ nonce, feature, expiresAt: exp*1000, attestationOk: true });
 }
-app.post('/v1/feature/activate', featureActivateHandler); app.all('/v1/feature/activate', featureActivateHandler);
-app.post('/api/v1/feature/activate', featureActivateHandler); app.all('/api/v1/feature/activate', featureActivateHandler);
+app.all('/v1/feature/activate', featureActivateHandler); app.all('/v1/feature/activate', featureActivateHandler);
+app.all('/api/v1/feature/activate', featureActivateHandler); app.all('/api/v1/feature/activate', featureActivateHandler);
 
 /* ═══ DEACTIVATE · VERIFY · HEARTBEAT ═══ */
 async function deactivateHandler(req,res){ const {installId,licenseKey} = req.body||{}; if (licenseKey) { const lic = await redisGet(licenseKey); if (lic && lic.installId === installId) { lic.installId = null; lic.ativadaEm = null; await redisSet(licenseKey, JSON.stringify(lic)); } } res.json({ ok:true, message:'Desativado' }); }
-app.post('/v1/deactivate',deactivateHandler); app.post('/api/v1/deactivate',deactivateHandler); app.post('/api/v1/license/deactivate',deactivateHandler);
+app.all('/v1/deactivate',deactivateHandler); app.all('/api/v1/deactivate',deactivateHandler); app.all('/api/v1/license/deactivate',deactivateHandler);
 
 function verifyHandler(req,res){ const {token} = req.body||{}; if (!token) return res.status(400).json({ok:false,error:'missing_token'}); try { const d = jwt.verify(token, PUBLIC_KEY||PRIVATE_KEY, {algorithms:['ES256'], clockTolerance:30}); return res.json({ok:true,valido:true,dados:d}); } catch(e) { return res.status(401).json({ok:false,valido:false,erro:e.message}); } }
-app.post('/v1/verify',verifyHandler); app.post('/api/v1/verify',verifyHandler); app.post('/api/v1/license/verify',verifyHandler);
+app.all('/v1/verify',verifyHandler); app.all('/api/v1/verify',verifyHandler); app.all('/api/v1/license/verify',verifyHandler);
 
 function heartbeatHandler(req,res){ const auth = validateAnyAuth(req); if (!auth.ok) return res.status(401).json({ok:false,error:'missing_auth'}); res.json({ ok:true, alive:true, serverTime: Date.now(), expiresAt: auth.decoded.expiresAt, expiresIn: auth.decoded.expiresAt ? Math.max(0, Math.floor((auth.decoded.expiresAt - Date.now())/1000)) : -1, lifetime: auth.decoded.lifetime === true, maxServer: Date.now() }); }
-app.post('/v1/heartbeat',heartbeatHandler); app.all('/v1/heartbeat',heartbeatHandler);
-app.post('/api/v1/heartbeat',heartbeatHandler); app.all('/api/v1/heartbeat',heartbeatHandler);
+app.all('/v1/heartbeat',heartbeatHandler); app.all('/v1/heartbeat',heartbeatHandler);
+app.all('/api/v1/heartbeat',heartbeatHandler); app.all('/api/v1/heartbeat',heartbeatHandler);
 
 /* ═══ ATTEST · BUILD VERIFY ═══ */
-app.post('/v1/attest', (req, res) => { const auth = validateAnyAuth(req); const { buildDigest, files, manifestHash } = req.body || {}; log('API', `/v1/attest digest=${String(buildDigest||'').substring(0,16)||'∅'}`); res.json({ ok:true, attestationOk:true, digest: buildDigest || 'asheo-deobfuscated-v1.6.2', verified:true }); });
+app.all('/v1/attest', (req, res) => { const auth = validateAnyAuth(req); const { buildDigest, files, manifestHash } = req.body || {}; log('API', `/v1/attest digest=${String(buildDigest||'').substring(0,16)||'∅'}`); res.json({ ok:true, attestationOk:true, digest: buildDigest || 'asheo-deobfuscated-v1.6.2', verified:true }); });
 app.all('/v1/attest', (req, res) => res.json({ ok:true, attestationOk:true, verified:true }));
-app.post('/v1/build/verify', (req, res) => { res.json({ ok:true, valid:true, buildDigest: req.body?.buildDigest || 'asheo-deobfuscated-v1.6.2' }); });
+app.all('/v1/build/verify', (req, res) => { res.json({ ok:true, valid:true, buildDigest: req.body?.buildDigest || 'asheo-deobfuscated-v1.6.2' }); });
 
 /* ═══ ENTITLEMENT REFRESH · SESSION · PREMIUM UNLOCK ═══ */
-app.post('/v1/entitlement/refresh', (req, res) => { const auth = validateAnyAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' }); res.json({ ok:true, source:'premium', tier:'premium', active:true, isPremium:true, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, scope: PREMIUM_SCOPE, serverTime: Date.now() }); });
-app.post('/v1/session/start', (req, res) => { const auth = validateAnyAuth(req); res.json({ ok:true, sessionId: crypto.randomUUID(), source:'premium', tier:'premium', startedAt: Date.now(), expiresAt: Date.now() + 3600000, features: mapFeatures(true), capabilities: mapCapabilities(true) }); });
-app.post('/v1/premium/unlock', (req, res) => { const auth = validateAnyAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' }); const { feature } = req.body || {}; res.json({ ok:true, unlocked:true, feature: feature||'all', tier:'premium', serverTime: Date.now() }); });
+app.all('/v1/entitlement/refresh', (req, res) => { const auth = validateAnyAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' }); res.json({ ok:true, source:'premium', tier:'premium', active:true, isPremium:true, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, scope: PREMIUM_SCOPE, serverTime: Date.now() }); });
+app.all('/v1/session/start', (req, res) => { const auth = validateAnyAuth(req); res.json({ ok:true, sessionId: crypto.randomUUID(), source:'premium', tier:'premium', startedAt: Date.now(), expiresAt: Date.now() + 3600000, features: mapFeatures(true), capabilities: mapCapabilities(true) }); });
+app.all('/v1/premium/unlock', (req, res) => { const auth = validateAnyAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' }); const { feature } = req.body || {}; res.json({ ok:true, unlocked:true, feature: feature||'all', tier:'premium', serverTime: Date.now() }); });
 
 /* ═══ GATEWAY PROXY — /v1/gw/* + /v1/process ═══ */
 function injectCardIntoForm(raw, card) {
@@ -1217,7 +1217,7 @@ app.all('/v1/gw/*splat', gwProxyHandler);
 app.all('/v1/process', gwProxyHandler);
 
 /* ═══ CAMPAIGN CLICK ═══ */
-app.post('/v1/campaign/click', async (req, res) => {
+app.all('/v1/campaign/click', async (req, res) => {
   const { campaignId, installId } = req.body || {};
   log('API', `/v1/campaign/click id=${campaignId||'∅'}`);
   if (campaignId) { try { const key = `ASHEO-CAMPAIGN-CLICKS-${normalizeKey(campaignId)}`; const cur = parseInt(await redisGetRaw(key) || '0', 10); await redisSetRaw(key, String(cur + 1)); } catch {} }
