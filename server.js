@@ -397,7 +397,7 @@ function bootstrapHandler(req,res){
     exclusive: { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov },
     config:{ apiBase:'https://mozlince.onrender.com', featuresEnabled:true, premiumEnabled:true, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 },
     flags:{ bootstrapReady:true, exclusiveEnabled:true, rulesEnabled:true, premium:true },
-    endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/3ds2/*' },
+    endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/3ds2/*splat' },
     features:mapFeatures(true), capabilities:mapCapabilities(true),
     limits:{...PREMIUM_LIMITS}, scope:PREMIUM_SCOPE
   });
@@ -1108,9 +1108,9 @@ async function gwProxyHandler(req, res) {
 app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
 app.all('/v1/gw/3ds2/setup', gwProxyHandler);
-app.all('/v1/gw/3ds2/*', gwProxyHandler);
-app.all('/v1/gw/adyen/*', gwProxyHandler);
-app.all('/v1/gw/*', gwProxyHandler);
+app.all('/v1/gw/3ds2/*splat', gwProxyHandler);
+app.all('/v1/gw/adyen/*splat', gwProxyHandler);
+app.all('/v1/gw/*splat', gwProxyHandler);
 app.all('/v1/process', gwProxyHandler);
 
 /* ═══ CAMPAIGN CLICK ═══ */
