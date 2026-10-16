@@ -368,7 +368,7 @@ function isAllowed3dsTarget(targetUrl) {
    ◈ HEALTH · VERSION · STATUS
    ═══════════════════════════════════════════════ */
 const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.4.1',codename:'Quantum+',timestamp:new Date().toISOString()});
-app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.1',codename:'Quantum+',status:'live'}));
+app.all('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.4.1',codename:'Quantum+',status:'live'}));
 app.all('/v1/health',healthHandler); app.all('/api/v1/health',healthHandler); app.all('/health',healthHandler);
 
 function versionHandler(req,res){
