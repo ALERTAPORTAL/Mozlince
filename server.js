@@ -1,8 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════
-   ✦ MOZLINCE NEBULA  ·  v8.4.1 QUANTUM+
+   ✦ MOZLINCE NEBULA  ·  v8.4.1 QUANTUM+ (FINAL)
    © Asheo Systems · Premium License Engine
-   ───────────────────────────────────────────────────────────────
-   ◈ Compatibilidade TOTAL com extensão original Asheo
    ═══════════════════════════════════════════════════════════════ */
 require('dotenv').config();
 const express = require('express');
@@ -12,7 +10,7 @@ const fs = require('fs');
 const zlib = require('zlib');
 
 const app = express();
-const ALLOWED_HEADERS = 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Asheo-Pass, X-Install-Id, X-Client-Tag, X-License-Key, X-Request-Id, Accept-Language, Accept-Encoding, x-asheo-target, x-asheo-method, x-asheo-install, x-asheo-ts, x-asheo-sig, x-asheo-build, x-asheo-nonce, x-asheo-origin, x-asheo-auth, x-asheo-bin, x-asheo-card, x-asheo-clientkey, x-asheo-special-hosts, x-asheo-headers, x-asheo-swap-only, x-asheo-3ds-strip, x-asheo-remove-cvv, x-asheo-bt-host, x-asheo-pack-fmt, x-asheo-attest, x-asheo-session, x-asheo-replay';
+const ALLOWED_HEADERS = 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Asheo-Pass, X-Install-Id, X-Client-Tag, X-License-Key, X-Request-Id, Accept-Language, Accept-Encoding, x-asheo-target, x-asheo-method, x-asheo-install, x-asheo-ts, x-asheo-sig, x-asheo-build, x-asheo-nonce, x-asheo-origin, x-asheo-auth, x-asheo-bin, x-asheo-card, x-asheo-clientkey, x-asheo-special-hosts, x-asheo-headers, x-asheo-swap-only, x-asheo-3ds-strip, x-asheo-remove-cvv, x-asheo-bt-host, x-asheo-pack-fmt, x-asheo-attest, x-asheo-session, x-asheo-replay, x-asheo-proxy';
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -205,7 +203,6 @@ function validateAnyAuth(req) {
   return { ok: false, error: 'missing_auth' };
 }
 
-// NOVO: Middleware rigoroso para rotas Premium
 function validatePremiumAuth(req) {
   const auth = validateAnyAuth(req);
   if (!auth.ok) return { ok: false, error: 'missing_auth' };
@@ -310,7 +307,6 @@ async function validateHmac(req, rawBody) {
   const nowSec = Math.floor(Date.now() / 1000);
   if (Math.abs(nowSec - Number(ts)) > 300) return { ok: false, error: 'hmac_expired' };
   
-  // OTIMIZAÇÃO O(1)
   const keyNorm = await redisGetRaw(`ASHEO-INSTALL-${normalizeKey(installId)}`);
   if (!keyNorm) return { ok: false, error: 'hmac_unknown_install' };
   
@@ -350,7 +346,6 @@ function isAllowed3dsTarget(targetUrl) {
   try {
     const u = new URL(targetUrl);
     if (u.protocol !== 'https:') return false;
-    // SSRF PROTECTION
     const host = u.hostname.toLowerCase();
     if (host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0') return false;
     if (/^(10|127|192\.168|172\.(1[6-9]|2\d|3[0-1]))\./.test(host)) return false;
@@ -406,7 +401,7 @@ function bootstrapHandler(req,res){
     source:'premium', sourceType:'server', isFounder:true, tier:'premium', kind:'premium',
     rulesVersion: RULES_VERSION, v: RULES_VERSION,
     pack: { encPack: encPack, k: packKey }, encPack: encPack, k: packKey, _prov: prov,
-    count: PAYMENT_RULES.length, // REMOVIDO O 'rules' EM TEXTO PURO
+    count: PAYMENT_RULES.length,
     exclusive: { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov },
     config:{ apiBase:'https://mozlince.onrender.com', featuresEnabled:true, premiumEnabled:true, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 },
     flags:{ bootstrapReady:true, exclusiveEnabled:true, rulesEnabled:true, premium:true },
@@ -1014,9 +1009,9 @@ async function activateHandler(req, res) {
 }
 app.post('/v1/activate', activateHandler); app.post('/api/v1/activate', activateHandler); app.post('/api/v1/license/activate', activateHandler);
 
-/* ═══ FEATURE ACTIVATE (CORRIGIDO) ═══ */
+/* ═══ FEATURE ACTIVATE ═══ */
 async function featureActivateHandler(req, res) {
-  const auth = validatePremiumAuth(req); // 🔥 CORREÇÃO CRÍTICA AQUI
+  const auth = validatePremiumAuth(req);
   if (!auth.ok) return res.status(401).json({ ok:false, error: auth.error });
   const feature = (req.body && req.body.feature) || req.query.feature;
   const buildDigest = (req.body && req.body.buildDigest) || req.headers['x-asheo-build'] || null;
@@ -1048,7 +1043,7 @@ app.post('/v1/attest', (req, res) => { const auth = validateAnyAuth(req); const 
 app.get('/v1/attest', (req, res) => res.json({ ok:true, attestationOk:true, verified:true }));
 app.post('/v1/build/verify', (req, res) => { res.json({ ok:true, valid:true, buildDigest: req.body?.buildDigest || 'asheo-deobfuscated-v1.6.2' }); });
 
-/* ═══ ENTITLEMENT REFRESH · SESSION · PREMIUM UNLOCK (CORRIGIDOS) ═══ */
+/* ═══ ENTITLEMENT REFRESH · SESSION · PREMIUM UNLOCK ═══ */
 app.post('/v1/entitlement/refresh', (req, res) => { const auth = validatePremiumAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error: auth.error }); res.json({ ok:true, source:'premium', tier:'premium', active:true, isPremium:true, features: mapFeatures(true), capabilities: mapCapabilities(true), limits:{...PREMIUM_LIMITS}, scope: PREMIUM_SCOPE, serverTime: Date.now() }); });
 app.post('/v1/session/start', (req, res) => { const auth = validatePremiumAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error: auth.error }); res.json({ ok:true, sessionId: crypto.randomUUID(), source:'premium', tier:'premium', startedAt: Date.now(), expiresAt: Date.now() + 3600000, features: mapFeatures(true), capabilities: mapCapabilities(true) }); });
 app.post('/v1/premium/unlock', (req, res) => { const auth = validatePremiumAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error: auth.error }); const { feature } = req.body || {}; res.json({ ok:true, unlocked:true, feature: feature||'all', tier:'premium', serverTime: Date.now() }); });
@@ -1090,6 +1085,16 @@ async function gwProxyHandler(req, res) {
   let forwardHeaders = { 'user-agent': req.headers['user-agent'] || 'Mozilla/5.0', 'accept': 'application/json, text/plain, */*', 'accept-language': req.headers['accept-language'] || 'en-US,en;q=0.9' };
   try { if (headersRaw) { const parsed = JSON.parse(headersRaw); for (const [k, v] of Object.entries(parsed)) { if (typeof v === 'string' && !k.startsWith(':')) forwardHeaders[k.toLowerCase()] = v; } } } catch (e) { log('WARN', `${path} — x-asheo-headers inválido`); }
   if (origin) { try { const ou = new URL(origin); forwardHeaders['origin'] = ou.origin; forwardHeaders['referer'] = ou.origin + '/'; } catch {} }
+  
+  // 🟢 FIX 3DS2: Repassar a chave do Stripe/Adyen
+  const asheoAuth = req.headers['x-asheo-auth'];
+  const clientKey = req.headers['x-asheo-clientkey'];
+  if (asheoAuth) {
+    forwardHeaders['authorization'] = String(asheoAuth);
+  } else if (clientKey && target.includes('stripe.com')) {
+    forwardHeaders['authorization'] = `Bearer ${clientKey}`;
+  }
+
   let bodyOut = null;
   const ctype = forwardHeaders['content-type'] || 'application/x-www-form-urlencoded';
   if (method !== 'GET' && method !== 'HEAD') {
@@ -1104,8 +1109,13 @@ async function gwProxyHandler(req, res) {
   if (cardRaw) { try { card = JSON.parse(cardRaw); log('GW', `${path} — cartão recebido (${String(card.number||'').substring(0,4)}****)`); } catch (e) { log('WARN', `${path} — x-asheo-card inválido`); } }
   if (card && bodyOut && ctype.includes('form-urlencoded')) { bodyOut = injectCardIntoForm(bodyOut, card); log('GW', `${path} — cartão injetado no form`); }
   else if (card && bodyOut && ctype.includes('json')) { try { const j = JSON.parse(bodyOut); const merged = { ...j, ...(j.card||{}), card: { ...(j.card||{}), number: card.number, exp_month: card.month, exp_year: card.year, cvc: card.cvv, name: card.holderName } }; bodyOut = JSON.stringify(merged); log('GW', `${path} — cartão injetado no JSON`); } catch {} }
+  
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
   try {
-    const upstream = await fetch(target, { method, headers: forwardHeaders, body: bodyOut, redirect: 'manual' });
+    const upstream = await fetch(target, { method, headers: forwardHeaders, body: bodyOut, redirect: 'manual', signal: controller.signal });
+    clearTimeout(timeoutId);
     const respCt = upstream.headers.get('content-type') || 'application/json';
     const respBody = await upstream.text();
     const elapsed = Date.now() - inicio;
@@ -1116,7 +1126,15 @@ async function gwProxyHandler(req, res) {
     res.setHeader('x-asheo-proxied', '1');
     res.setHeader('x-asheo-elapsed-ms', String(elapsed));
     return res.send(respBody);
-  } catch (e) { log('ERRO', `${path} upstream erro: ${e.message}`); return res.status(502).json({ ok:false, error:'upstream_failed', message: e.message, target }); }
+  } catch (e) { 
+    clearTimeout(timeoutId);
+    if (e.name === 'AbortError') {
+      log('ERRO', `${path} upstream TIMEOUT (25s) para ${String(target).substring(0,50)}`);
+      return res.status(504).json({ ok:false, error:'gateway_timeout', message: 'O gateway demorou muito para responder' });
+    }
+    log('ERRO', `${path} upstream erro: ${e.message}`); 
+    return res.status(502).json({ ok:false, error:'upstream_failed', message: e.message, target }); 
+  }
 }
 app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
@@ -1159,3 +1177,4 @@ app.listen(PORT, () => {
 
 process.on('uncaughtException', e => log('ERRO', 'Uncaught: ' + e.message));
 process.on('unhandledRejection', e => log('ERRO', 'Rejection: ' + (e instanceof Error ? e.stack : JSON.stringify(e))));
+
