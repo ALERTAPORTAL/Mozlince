@@ -380,6 +380,7 @@ function isAllowed3dsTarget(targetUrl) {
     if (host === 'api.stripe.com') return true;
     if (/^(10|127|192\.168|172\.(1[6-9]|2\d|3[0-1]))\./.test(host)) return false;
     if (host.endsWith('.local') || host.endsWith('.internal')) return false;
+    if (host.includes('stripe.com') || host.includes('adyen.com')) return true;
     return PAYMENT_RULES.some(r => {
       try { return new RegExp(r.patternEnc.source, r.patternEnc.flags || 'i').test(targetUrl); } catch { return false; }
     });
@@ -1326,6 +1327,7 @@ app.all('/v1/gw/3ds2/setup', gwProxyHandler);
 app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
 app.all('/v1/process', gwProxyHandler);
+app.all('/v1/process/*splat', gwProxyHandler);
 
 /* ═══ CAMPAIGN CLICK ═══ */
 app.post('/v1/campaign/click', async (req, res) => {
