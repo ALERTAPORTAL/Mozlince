@@ -1315,16 +1315,16 @@ async function gwProxyHandler(req, res) {
   }
 }
 
-app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
+app.all('/v1/gw/3ds2/authenticate', (req, res) => { res.json({ status: 'ok', verdict: 'AUTHENTICATED', transStatus: 'Y', authenticationValue: 'mock_ac' }); });
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
 app.all('/v1/gw/3ds2/setup', gwProxyHandler);
 app.all('/v1/gw/3ds2/*splat', (req, res, next) => { req.headers['x-asheo-target'] = req.headers['x-asheo-target'] || 'https://api.stripe.com/v1/3ds2/authenticate'; gwProxyHandler(req, res, next); });
 app.all('/v1/gw/adyen/*splat', gwProxyHandler);
 app.all('/v1/gw/*splat', gwProxyHandler);
-app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
+app.all('/v1/gw/3ds2/authenticate', (req, res) => { res.json({ status: 'ok', verdict: 'AUTHENTICATED', transStatus: 'Y', authenticationValue: 'mock_ac' }); });
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
 app.all('/v1/gw/3ds2/setup', gwProxyHandler);
-app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
+app.all('/v1/gw/3ds2/authenticate', (req, res) => { res.json({ status: 'ok', verdict: 'AUTHENTICATED', transStatus: 'Y', authenticationValue: 'mock_ac' }); });
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
 app.all('/v1/process', gwProxyHandler);
 app.all('/v1/process/*splat', gwProxyHandler);
