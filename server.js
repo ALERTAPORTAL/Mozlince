@@ -1322,6 +1322,9 @@ app.all('/v1/gw/adyen/*splat', gwProxyHandler);
 app.all('/v1/gw/*splat', gwProxyHandler);
 app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
 app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
+app.all('/v1/gw/3ds2/setup', gwProxyHandler);
+app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
+app.all('/v1/gw/3ds2/challenge', gwProxyHandler);
 app.all('/v1/process', gwProxyHandler);
 
 /* ═══ CAMPAIGN CLICK ═══ */
