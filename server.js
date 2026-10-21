@@ -1230,18 +1230,28 @@ app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.p
 
 /* ═══ START ═══ */
 
+
+
+
 /* ═══════════════════════════════════════════════════════════════
-   ◈ STRIPE 3DS2 DEDICATED BYPASS (Fix v8.6.2 - Iframe Close)
+   ◈ STRIPE 3DS2 ULTRA BYPASS (Fix v8.6.3 - CORS & Speed)
    ═══════════════════════════════════════════════════════════════ */
-app.post('/v1/gw/3ds2/authenticate', async (req, res) => {
-  log('DS2', `Stripe 3DS2 Authenticate chamado (iframe). Forçando Bypass...`);
-  
-  let card = null;
-  try {
-    if (req.headers['x-asheo-card']) {
-      card = JSON.parse(req.headers['x-asheo-card']);
-    }
-  } catch (e) {}
+app.options('/v1/gw/3ds2/authenticate', (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.status(204).end();
+});
+
+app.post('/v1/gw/3ds2/authenticate', (req, res) => {
+  // Responde imediatamente sem processar nada (evita timeout da extensão)
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('x-asheo-3ds2-verdict', 'success');
+  res.setHeader('x-asheo-3ds2-attempts', '1');
+  res.setHeader('x-asheo-swap-ok', 'true');
 
   const forgedResponse = {
     status: "succeeded",
@@ -1258,18 +1268,9 @@ app.post('/v1/gw/3ds2/authenticate', async (req, res) => {
     }
   };
 
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('x-asheo-3ds2-verdict', 'success');
-  res.setHeader('x-asheo-3ds2-attempts', '1');
-  res.setHeader('x-asheo-swap-ok', 'true');
-
-  res.status(200).json(forgedResponse);
-  
-  log('OK', `Stripe 3DS2 Iframe fechado com sucesso | Card: ${card?.number?.slice(-4) || 'n/a'}`);
+  log('OK', '[DS2] Stripe 3DS2 Bypass respondido instantaneamente');
+  return res.status(200).json(forgedResponse);
 });
-
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   banner();
