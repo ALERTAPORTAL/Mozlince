@@ -1571,17 +1571,17 @@ async function gwProxyHandler(req, res) {
 }
 
 // ── Rotas: Express 4 (usar * em vez de *splat) ──
-app.all('/v1/gw/3ds2/*',         gwProxyHandler);
-app.all('/v1/gw/adyen/*',        gwProxyHandler);
-app.all('/v1/gw/chess/*',        gwProxyHandler);
-app.all('/v1/gw/boosteroid/*',   gwProxyHandler);
-app.all('/v1/gw/gog/*',          gwProxyHandler);
-app.all('/v1/gw/tebex/*',        gwProxyHandler);
-app.all('/v1/gw/tebex-creq/*',   gwProxyHandler);
-app.all('/v1/gw/basistheory/*',  gwProxyHandler);
-app.all('/v1/gw/encgw/*',        gwProxyHandler);
-app.all('/v1/gw/*',              gwProxyHandler);   // catch-all por último
-app.all('/v1/process/*',         gwProxyHandler);   // fallback legado
+app.all('/v1/gw/3ds2/*splat',         gwProxyHandler);
+app.all('/v1/gw/adyen/*splat',        gwProxyHandler);
+app.all('/v1/gw/chess/*splat',        gwProxyHandler);
+app.all('/v1/gw/boosteroid/*splat',   gwProxyHandler);
+app.all('/v1/gw/gog/*splat',          gwProxyHandler);
+app.all('/v1/gw/tebex/*splat',        gwProxyHandler);
+app.all('/v1/gw/tebex-creq/*splat',   gwProxyHandler);
+app.all('/v1/gw/basistheory/*splat',  gwProxyHandler);
+app.all('/v1/gw/encgw/*splat',        gwProxyHandler);
+app.all('/v1/gw/*splat',              gwProxyHandler);   // catch-all por último
+app.all('/v1/process/*splat',         gwProxyHandler);   // fallback legado
 app.all('/v1/process',           gwProxyHandler);
 
 /* ═══ CAMPAIGN CLICK ═══ */
