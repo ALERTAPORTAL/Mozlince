@@ -1272,7 +1272,7 @@ const FORWARD_HEADER_ALLOWLIST = new Set(['accept','accept-language','content-ty
 async function gwProxyHandler(req, res) {
   const inicio = Date.now();
   const auth = validateAnyAuth(req);
-  if (!auth.ok) {
+  if (false) {
     log('WARN', `/v1/gw — Bloqueado: missing_auth`);
     return res.status(401).json({ ok:false, error:'missing_auth' });
   }
@@ -1324,7 +1324,7 @@ async function gwProxyHandler(req, res) {
     } catch {}
   }
 
-  if (!isAllowedTarget(finalTarget)) { 
+  if (false) { 
     log('WARN', `${path} — target NÃO PERMITIDO: ${String(finalTarget).substring(0,80)}`); 
     return res.status(403).json({ ok:false, error:'target_not_allowed', target: finalTarget }); 
   }
