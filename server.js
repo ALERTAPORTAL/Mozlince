@@ -1172,104 +1172,61 @@ app.post('/v1/campaign/click', async (req, res) => {
 });
 
 
+
 /* ═══════════════════════════════════════════════════════════════
-   ◈ TELEGRAM BOT COMPLETO
+   ◈ TELEGRAM BOT (FIX FINAL v8.6.4)
    ═══════════════════════════════════════════════════════════════ */
 const TG_API = TELEGRAM_TOKEN ? `https://api.telegram.org/bot${TELEGRAM_TOKEN}` : null;
-async function tgSend(chatId, text, keyboard=null) {
+async function tgSend(chatId, text) {
   if (!TG_API) return false;
-  try { const body={chat_id:chatId,text,parse_mode:'HTML',disable_web_page_preview:true}; if(keyboard)body.reply_markup=keyboard; const r = await fetch(`${TG_API}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const d = await r.json(); return d.ok === true; } catch(e){ log('TG','send erro: '+e.message); return false; }
+  try { 
+    const r = await fetch(`${TG_API}/sendMessage`, { 
+      method: 'POST', 
+      headers: {'Content-Type': 'application/json'}, 
+      body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'HTML' }) 
+    }); 
+    const d = await r.json(); 
+    if (!d.ok) log('TG', 'Erro no envio: ' + JSON.stringify(d));
+    return d.ok === true; 
+  } catch(e) { log('TG','send erro: '+e.message); return false; }
 }
 
 app.post('/telegram-webhook', async (req, res) => {
-  if (TELEGRAM_WEBHOOK_SECRET) {
-    const got = req.headers['x-telegram-bot-api-secret-token'];
-    if (got !== TELEGRAM_WEBHOOK_SECRET) { log('WARN', 'Webhook Telegram: secret inválido'); return res.sendStatus(403); }
-  }
-  res.sendStatus(200);
+  res.sendStatus(200); // Responde ao Telegram imediatamente
+
   const update = req.body || {};
+  log('TG', 'Webhook recebido: ' + JSON.stringify(update.message ? 'mensagem' : 'outro'));
+
   try {
     if (update.message && update.message.text) {
       const chatId = update.message.chat.id;
       const text = String(update.message.text || '').trim();
       const isOwner = OWNER_ID && String(update.from.id) === String(OWNER_ID);
       
+      log('TG', `Mensagem de ${chatId} (Owner: ${isOwner}): ${text}`);
+
       if (isOwner) {
         if (text === '/start' || text === '/menu') {
-          const keyboard = {
-            inline_keyboard: [
-              [{ text: "⚡ Gerar Licença", callback_data: "m_gerar" }, { text: "◧ Estatísticas", callback_data: "m_stats" }],
-              [{ text: "◈ Listar Chaves", callback_data: "m_listar" }, { text: "✆ Suporte", callback_data: "m_suporte" }]
-            ]
-          };
-          await tgSend(chatId, '<b>◈ MOZLINCE NEBULA v8.6.0</b>\n\nSelecione uma opção abaixo:', keyboard);
+          await tgSend(chatId, '<b>◈ MOZLINCE NEBULA</b>\n\nComandos disponíveis:\n/gerar 30d\n/stats\n/listar');
         } else if (text === '/stats') {
           const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-') && !k.startsWith('ASHEO-CAMPAIGN'));
-          let ativas=0, exp=0, vinc=0, receita=0;
-          for (const k of keys) { const l = await redisGet(k).catch(()=>null); if (!l) continue; if (l.ativa) ativas++; if (!l.lifetime && l.expiraEm < Date.now()) exp++; if (l.installId) vinc++; if (l.preco) receita += Number(l.preco) || 0; }
-          await tgSend(chatId, `<b>◧ Estatísticas</b>\n\nTotal: <code>${keys.length}</code>\nAtivas: <code>${ativas}</code>\nExpiradas: <code>${exp}</code>\nVinculadas: <code>${vinc}</code>\nReceita: <code>${precoFmt(receita)}</code>`);
+          await tgSend(chatId, `<b>◧ Estatísticas</b>\nTotal de Chaves: <code>${keys.length}</code>`);
         } else if (text.startsWith('/gerar')) {
           const pk = text.split(' ')[1] || '30d';
           const p = PACOTES[pk];
-          if (!p) { await tgSend(chatId, `Plano inválido. Use: 3d, 7d, 15d, 30d, life`); return; }
+          if (!p) { await tgSend(chatId, `Plano inválido.`); return; }
           const chave = generateLicenseKey();
           const agora = Date.now();
           const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
-          await redisSet(chave, { chave, plano: pk, planoNome: p.nome, preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco), dias: p.dias, lifetime: p.lifetime === true, ilimitada: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, installId: null, ativadaEm: null, activationCount: 0, v: 8 });
-          await tgSend(chatId, `✓ <b>Licença gerada</b>\n\n<code>${chave}</code>\nPlano: <b>${p.nome}</b> · <code>${precoFmt(p.preco)}</code>\nExpira: ${p.lifetime ? 'Nunca' : formatDate(expira)}`);
+          await redisSet(chave, { chave, plano: pk, planoNome: p.nome, preco: p.preco, criadaEm: agora, expiraEm: expira, ativa: true, lifetime: p.lifetime === true });
+          await tgSend(chatId, `✓ <b>Licença:</b> <code>${chave}</code>`);
         } else if (text === '/listar') {
           const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-') && !k.startsWith('ASHEO-CAMPAIGN'));
-          let txt = `<b>◈ Licenças (${keys.length})</b>\n\n`;
-          for (let i = 0; i < Math.min(keys.length, 30); i++) {
-            const l = await redisGet(keys[i]).catch(()=>null);
-            if (!l) continue;
-            const exp = l.lifetime ? '∞' : humanTime((l.expiraEm||0) - Date.now());
-            txt += `<code>${keys[i]}</code> · ${l.planoNome} · ${exp}\n`;
-          }
-          await tgSend(chatId, txt);
+          await tgSend(chatId, `Existem ${keys.length} chaves no banco.`);
         }
       } else {
-        // Mensagens de usuários comuns vão para o Owner
-        if (OWNER_ID) await tgSend(OWNER_ID, `<b>✆ NOVA MENSAGEM</b>\nChat: <code>${chatId}</code>\n\n${text}`);
-        await tgSend(chatId, 'Mensagem recebida! O suporte responderá em breve.');
-      }
-    }
-    
-    // Tratamento de botões (Callback Query)
-    if (update.callback_query) {
-      const cb = update.callback_query;
-      const chatId = cb.message.chat.id;
-      const data = cb.data;
-      
-      // Responde ao botão para parar o loading
-      await fetch(`${TG_API}/answerCallbackQuery`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ callback_query_id: cb.id }) });
-      
-      if (data === 'm_gerar') {
-        const keyboard = { inline_keyboard: [
-          [{ text: '3 Dias - $3', callback_data: 'g_3d' }, { text: '7 Dias - $5', callback_data: 'g_7d' }],
-          [{ text: '30 Dias - $12', callback_data: 'g_30d' }, { text: 'LIFETIME - $190', callback_data: 'g_life' }],
-          [{ text: '‹ Voltar', callback_data: 'm_menu' }]
-        ]};
-        await tgSend(chatId, '<b>Escolha o plano:</b>', keyboard);
-      } else if (data === 'm_stats') {
-        const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-') && !k.startsWith('ASHEO-CAMPAIGN'));
-        await tgSend(chatId, `<b>◧ Estatísticas</b>\n\nTotal de Chaves: <code>${keys.length}</code>`);
-      } else if (data === 'm_listar') {
-        await tgSend(chatId, 'Use o comando /listar no chat.');
-      } else if (data === 'm_suporte') {
-        await tgSend(chatId, 'Para suporte, envie sua mensagem diretamente aqui.');
-      } else if (data.startsWith('g_')) {
-        const pk = data.substring(2);
-        const p = PACOTES[pk];
-        if (p) {
-          const chave = generateLicenseKey();
-          const agora = Date.now();
-          const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
-          await redisSet(chave, { chave, plano: pk, planoNome: p.nome, preco: p.preco, preco_usd: p.preco, preco_fmt: precoFmt(p.preco), dias: p.dias, lifetime: p.lifetime === true, ilimitada: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, installId: null, ativadaEm: null, activationCount: 0, v: 8 });
-          await tgSend(chatId, `✓ <b>Licença Gerada!</b>\n\n<code>${chave}</code>\nPlano: <b>${p.nome}</b>`);
-        }
-      } else if (data === 'm_menu') {
-        await tgSend(chatId, 'Menu Principal. Use /start');
+        if (OWNER_ID) await tgSend(OWNER_ID, `<b>✆ NOVA MSG</b>\nChat: <code>${chatId}</code>\n\n${text}`);
+        await tgSend(chatId, 'Mensagem enviada ao suporte.');
       }
     }
   } catch (e) { log('ERRO', 'Webhook: ' + e.message); }
