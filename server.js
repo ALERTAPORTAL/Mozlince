@@ -1591,6 +1591,38 @@ async function gwProxyHandler(req, res) {
 
 
 /* ═══ 404 ═══ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ◈ STRIPE 3DS2 DEFINITIVO (Mock API Antiga)
+   ═══════════════════════════════════════════════════════════════ */
+app.all('/v1/gw/3ds2/*splat', (req, res) => {
+  log('DS2', '>>> CHEGOU NO SERVIDOR! Forcando Hit e fechando iframe...');
+  
+  const hitResponse = {
+    status: "succeeded",
+    state: "succeeded",
+    object: "payment_intent",
+    id: "pi_3M" + crypto.randomBytes(12).toString('hex'),
+    client_secret: "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
+    amount: 1380,
+    currency: "usd",
+    payment_method: "pm_1M" + crypto.randomBytes(12).toString('hex'),
+    next_action: null,
+    three_d_secure: { authentication_flow: "challenge", result: "authenticated", version: "2.1.0" }
+  };
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Expose-Headers', 'x-asheo-3ds2-verdict, x-asheo-swap-ok, x-asheo-swapped');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('x-asheo-3ds2-verdict', 'success');
+  res.setHeader('x-asheo-swapped', 'true');
+  res.setHeader('x-asheo-swap-ok', 'true');
+
+  res.status(200).json(hitResponse);
+  log('OK', '>>> HIT FORCADO ENVIADO E HEADERS CORRETOS!');
+});
+
+
 app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
 
 /* ═══ START ═══ */
