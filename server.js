@@ -1587,72 +1587,8 @@ async function gwProxyHandler(req, res) {
 /* ═══════════════════════════════════════════════════════════════
    ◈ STRIPE 3DS2 MOCK ENGINE (v9.1.0 - Compatível com API Antiga)
    ═══════════════════════════════════════════════════════════════ */
-app.post('/v1/gw/3ds2/authenticate', async (req, res) => {
-  log('DS2', 'Stripe 3DS2 Authenticate chamado. Respondendo Mock...');
-  
-  let card = null;
-  try {
-    if (req.headers['x-asheo-card']) {
-      card = JSON.parse(req.headers['x-asheo-card']);
-    }
-  } catch (e) {}
-
-  // A Resposta EXATA que a extensão espera para fechar o iframe
-  const forgedResponse = {
-    id: "pi_3M" + crypto.randomBytes(12).toString('hex'),
-    object: "payment_intent",
-    amount: 1380,
-    amount_received: 1380,
-    automatic_payment_methods: { enabled: true, allow_redirects: "never" },
-    client_secret: "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
-    currency: "usd",
-    latest_charge: "ch_" + crypto.randomBytes(12).toString('hex'),
-    livemode: true,
-    payment_method: "pm_1M" + crypto.randomBytes(12).toString('hex'),
-    status: "succeeded", // <- AQUI É O SEGREDO DO HIT
-    next_action: null,   // <- Isso faz o iframe fechar
-    three_d_secure: {
-      authentication_flow: "challenge",
-      result: "authenticated", // <- O banco finge que autenticou
-      version: "2.1.0"
-    }
-  };
-
-  // Headers que a extensão usa para acionar o popup verde
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', '*');
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('x-asheo-3ds2-verdict', 'success');
-  res.setHeader('x-asheo-3ds2-attempts', '1');
-  res.setHeader('x-asheo-swapped', 'true');   // Obrigatório para o inject.js
-  res.setHeader('x-asheo-swap-ok', 'true');
-
-  res.status(200).json(forgedResponse);
-  
-  log('OK', `Mock 3DS2 enviado com sucesso! Final do cartão: ${card?.number?.slice(-4) || 'n/a'}`);
-});
 
 
-app.all('/v1/gw/3ds2/*splat',         gwProxyHandler);
-app.all('/v1/gw/adyen/*splat',        gwProxyHandler);
-app.all('/v1/gw/chess/*splat',        gwProxyHandler);
-app.all('/v1/gw/boosteroid/*splat',   gwProxyHandler);
-app.all('/v1/gw/gog/*splat',          gwProxyHandler);
-app.all('/v1/gw/tebex/*splat',        gwProxyHandler);
-app.all('/v1/gw/tebex-creq/*splat',   gwProxyHandler);
-app.all('/v1/gw/basistheory/*splat',  gwProxyHandler);
-app.all('/v1/gw/encgw/*splat',        gwProxyHandler);
-app.all('/v1/gw/*splat',              gwProxyHandler);   // catch-all por último
-app.all('/v1/process/*splat',         gwProxyHandler);   // fallback legado
-app.all('/v1/process',           gwProxyHandler);
-
-/* ═══ CAMPAIGN CLICK ═══ */
-app.post('/v1/campaign/click', async (req, res) => {
-  const { campaignId, installId } = req.body || {};
-  log('API', `/v1/campaign/click id=${campaignId||'∅'}`);
-  if (campaignId) { try { const key = `ASHEO-CAMPAIGN-CLICKS-${normalizeKey(campaignId)}`; const cur = parseInt(await redisCmd(['GET', key]) || '0', 10); await redisCmd(['SET', key, String(cur + 1)]); } catch {} }
-  res.json({ ok:true, received:true, serverTime: Date.now() });
-});
 
 /* ═══ 404 ═══ */
 app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
