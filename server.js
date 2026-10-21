@@ -1493,9 +1493,9 @@ async function gwProxyHandler(req, res) {
 app.all('/v1/gw/3ds2/authenticate', gwProxyHandler);
 app.all('/v1/gw/3ds2/challenge',    gwProxyHandler);
 app.all('/v1/gw/3ds2/setup',        gwProxyHandler);
-app.all('/v1/gw/3ds2/*',            gwProxyHandler);
-app.all('/v1/gw/adyen/*',           gwProxyHandler);
-app.all('/v1/gw/*',                 gwProxyHandler);
+app.all('/v1/gw/3ds2/*splat',            gwProxyHandler);
+app.all('/v1/gw/adyen/*splat',           gwProxyHandler);
+app.all('/v1/gw/*splat',                 gwProxyHandler);
 app.all('/v1/process',              gwProxyHandler);
 
 /* ═══ CAMPAIGN CLICK ═══ */
