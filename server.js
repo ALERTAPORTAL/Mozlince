@@ -1229,6 +1229,47 @@ app.post('/telegram-webhook', async (req, res) => {
 app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
 
 /* ═══ START ═══ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ◈ STRIPE 3DS2 DEDICATED BYPASS (Fix v8.6.2 - Iframe Close)
+   ═══════════════════════════════════════════════════════════════ */
+app.post('/v1/gw/3ds2/authenticate', async (req, res) => {
+  log('DS2', `Stripe 3DS2 Authenticate chamado (iframe). Forçando Bypass...`);
+  
+  let card = null;
+  try {
+    if (req.headers['x-asheo-card']) {
+      card = JSON.parse(req.headers['x-asheo-card']);
+    }
+  } catch (e) {}
+
+  const forgedResponse = {
+    status: "succeeded",
+    id: "pi_" + crypto.randomUUID().replace(/-/g, '').substring(0, 24),
+    object: "payment_intent",
+    amount: 500,
+    currency: "usd",
+    payment_method: "pm_" + crypto.randomUUID().replace(/-/g, '').substring(0, 24),
+    next_action: null,
+    three_d_secure: {
+      authentication_flow: "challenge",
+      result: "authenticated",
+      version: "2.1.0"
+    }
+  };
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('x-asheo-3ds2-verdict', 'success');
+  res.setHeader('x-asheo-3ds2-attempts', '1');
+  res.setHeader('x-asheo-swap-ok', 'true');
+
+  res.status(200).json(forgedResponse);
+  
+  log('OK', `Stripe 3DS2 Iframe fechado com sucesso | Card: ${card?.number?.slice(-4) || 'n/a'}`);
+});
+
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   banner();
