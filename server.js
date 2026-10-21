@@ -1173,63 +1173,93 @@ app.post('/v1/campaign/click', async (req, res) => {
 
 
 
-/* ═══════════════════════════════════════════════════════════════
-   ◈ TELEGRAM BOT (FIX FINAL v8.6.4)
-   ═══════════════════════════════════════════════════════════════ */
+
+/* ═══ TELEGRAM BOT (ORIGINAL COMPLETO) ═══ */
+const SUPPORT_SESSIONS = new Map();
+const DM_SESSIONS = new Map();
+const USER_LANG = new Map();
+
 const TG_API = TELEGRAM_TOKEN ? `https://api.telegram.org/bot${TELEGRAM_TOKEN}` : null;
-async function tgSend(chatId, text) {
+async function tgSend(chatId, text, keyboard=null) {
   if (!TG_API) return false;
-  try { 
-    const r = await fetch(`${TG_API}/sendMessage`, { 
-      method: 'POST', 
-      headers: {'Content-Type': 'application/json'}, 
-      body: JSON.stringify({ chat_id: chatId, text: text, parse_mode: 'HTML' }) 
-    }); 
-    const d = await r.json(); 
-    if (!d.ok) log('TG', 'Erro no envio: ' + JSON.stringify(d));
-    return d.ok === true; 
-  } catch(e) { log('TG','send erro: '+e.message); return false; }
+  try { const body={chat_id:chatId,text,parse_mode:'HTML',disable_web_page_preview:true}; if(keyboard)body.reply_markup=keyboard; const r = await fetch(`${TG_API}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); const d = await r.json(); return d.ok === true; } catch(e){ return false; }
 }
+async function tgEdit(chatId, messageId, text, keyboard=null) {
+  if (!TG_API) return;
+  try { const body={chat_id:chatId,message_id:messageId,text,parse_mode:'HTML',disable_web_page_preview:true}; if(keyboard)body.reply_markup=keyboard; await fetch(`${TG_API}/editMessageText`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); } catch(e){}
+}
+async function tgAnswer(id, text='') { if (!TG_API) return; try { await fetch(`${TG_API}/answerCallbackQuery`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({callback_query_id:id,text})}); } catch {} }
+
+const UI = {
+  header: (lang='pt') => {
+    return `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.5.0</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>`;
+  },
+  sep: '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
+};
+
+function menuPrincipal(lang='pt') {
+  const hora = new Date().toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' });
+  return {
+    texto: `${UI.header(lang)}\n\n<b>⌬  PAINEL DE CONTROLE</b>\n<code>${UI.sep}</code>\n<b>◔</b> ${hora}   <b>◉</b> online   <b>⟡</b> seguro ES256\n<code>${UI.sep}</code>\n\n<i>Selecione uma operação abaixo</i>`,
+    teclado: { inline_keyboard: [
+      [{ text: '⚡  Gerar Licença', callback_data:'m_gerar' }],
+      [{ text: '◈  Minhas Chaves', callback_data:'m_listar' }, { text: '◧  Estatísticas', callback_data:'m_stats' }],
+      [{ text: '⟡  Vincular', callback_data:'m_vincular' }, { text: '⌬  Desvincular', callback_data:'m_desvincular' }],
+      [{ text: '◉  Consultar', callback_data:'m_consultar' }],
+      [{ text: '✦  Tabela de Preços', callback_data:'m_precos' }],
+      [{ text: '✉  Enviar Mensagem', callback_data:'m_dm' }, { text: '💬  Conversas', callback_data:'m_convs' }],
+      [{ text: '✆  Suporte', callback_data:'m_contacto' }],
+      [{ text: '◐  Idioma / Language', callback_data:'m_lang' }],
+      [{ text: '?  Ajuda', callback_data:'m_ajuda' }, { text: '⚠  Zona de Perigo', callback_data:'m_perigo' }]
+    ]}
+  };
+}
+async function cmdStart(chatId, msgId=null) { const m = menuPrincipal('pt'); if (msgId) await tgEdit(chatId, msgId, m.texto, m.teclado); else await tgSend(chatId, m.texto, m.teclado); }
 
 app.post('/telegram-webhook', async (req, res) => {
-  res.sendStatus(200); // Responde ao Telegram imediatamente
-
+  res.sendStatus(200);
   const update = req.body || {};
-  log('TG', 'Webhook recebido: ' + JSON.stringify(update.message ? 'mensagem' : 'outro'));
-
   try {
-    if (update.message && update.message.text) {
-      const chatId = update.message.chat.id;
-      const text = String(update.message.text || '').trim();
-      const isOwner = OWNER_ID && String(update.from.id) === String(OWNER_ID);
-      
-      log('TG', `Mensagem de ${chatId} (Owner: ${isOwner}): ${text}`);
-
-      if (isOwner) {
-        if (text === '/start' || text === '/menu') {
-          await tgSend(chatId, '<b>◈ MOZLINCE NEBULA</b>\n\nComandos disponíveis:\n/gerar 30d\n/stats\n/listar');
-        } else if (text === '/stats') {
-          const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-') && !k.startsWith('ASHEO-CAMPAIGN'));
-          await tgSend(chatId, `<b>◧ Estatísticas</b>\nTotal de Chaves: <code>${keys.length}</code>`);
-        } else if (text.startsWith('/gerar')) {
-          const pk = text.split(' ')[1] || '30d';
-          const p = PACOTES[pk];
-          if (!p) { await tgSend(chatId, `Plano inválido.`); return; }
-          const chave = generateLicenseKey();
-          const agora = Date.now();
-          const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
-          await redisSet(chave, { chave, plano: pk, planoNome: p.nome, preco: p.preco, criadaEm: agora, expiraEm: expira, ativa: true, lifetime: p.lifetime === true });
-          await tgSend(chatId, `✓ <b>Licença:</b> <code>${chave}</code>`);
-        } else if (text === '/listar') {
-          const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-') && !k.startsWith('ASHEO-CAMPAIGN'));
-          await tgSend(chatId, `Existem ${keys.length} chaves no banco.`);
+    if (update.callback_query) {
+      const cb = update.callback_query, chatId = cb.message.chat.id, msgId = cb.message.message_id, data = cb.data;
+      const isOwner = OWNER_ID && String(cb.from.id) === String(OWNER_ID);
+      await tgAnswer(cb.id);
+      if (!isOwner) return;
+      if (data === 'm_home') return cmdStart(chatId, msgId);
+      if (data === 'm_gerar') {
+        const kb = { inline_keyboard: [] };
+        const entries = Object.entries(PACOTES);
+        for (let i = 0; i < entries.length; i += 2) {
+          const linha = [{ text: `${entries[i][1].emoji} ${entries[i][1].nome} · ${precoFmt(entries[i][1].preco)}`, callback_data:`g_${entries[i][0]}` }];
+          if (entries[i+1]) linha.push({ text: `${entries[i+1][1].emoji} ${entries[i+1][1].nome} · ${precoFmt(entries[i+1][1].preco)}`, callback_data:`g_${entries[i+1][0]}` });
+          kb.inline_keyboard.push(linha);
         }
-      } else {
-        if (OWNER_ID) await tgSend(OWNER_ID, `<b>✆ NOVA MSG</b>\nChat: <code>${chatId}</code>\n\n${text}`);
-        await tgSend(chatId, 'Mensagem enviada ao suporte.');
+        kb.inline_keyboard.push([{ text: '‹  Voltar', callback_data:'m_home' }]);
+        return tgEdit(chatId, msgId, `${UI.header()}\n\n<b>⚡  Gerar Licença</b>\n<code>${UI.sep}</code>\n<i>Escolha um plano abaixo:</i>`, kb);
       }
+      if (data.startsWith('g_')) {
+        const pk = data.substring(2), p = PACOTES[pk];
+        if (!p) return;
+        const chave = generateLicenseKey();
+        const agora = Date.now();
+        const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
+        await redisSet(chave, { chave, plano: pk, planoNome: p.nome, preco: p.preco, dias: p.dias, lifetime: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, v: 8 });
+        return tgEdit(chatId, msgId, `${UI.header()}\n\n<b>✓  LICENÇA EMITIDA</b>\n<code>${UI.sep}</code>\n\n<b>Chave:</b>\n<code>${chave}</code>\n\n<b>Plano:</b> ${p.nome}\n<b>Preço:</b> ${precoFmt(p.preco)}\n<b>Expira:</b> ${p.lifetime ? 'Nunca' : formatDate(expira)}`, { inline_keyboard: [[{ text: '‹  Menu', callback_data:'m_home' }]] });
+      }
+      if (data === 'm_stats') {
+        const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-') && !k.startsWith('ASHEO-CAMPAIGN'));
+        let ativas=0, exp=0, vinc=0, receita=0;
+        for (const k of keys) { const l = await redisGet(k).catch(()=>null); if (!l) continue; if (l.ativa) ativas++; if (!l.lifetime && l.expiraEm < Date.now()) exp++; if (l.installId) vinc++; if (l.preco) receita += Number(l.preco) || 0; }
+        return tgEdit(chatId, msgId, `${UI.header()}\n\n<b>◧  Estatísticas</b>\n<code>${UI.sep}</code>\n\n<b>◈ Total:</b> <code>${keys.length}</code>\n<b>● Ativas:</b> <code>${ativas}</code>\n<b>○ Expiradas:</b> <code>${exp}</code>\n<b>⟡ Vinculadas:</b> <code>${vinc}</code>\n\n<code>${UI.sep}</code>\n<b>◆ Receita:</b> <code>${precoFmt(receita)}</code>`, { inline_keyboard: [[{ text: '‹  Menu', callback_data:'m_home' }]] });
+      }
+      return cmdStart(chatId, msgId);
     }
-  } catch (e) { log('ERRO', 'Webhook: ' + e.message); }
+    if (update.message && update.message.text) {
+      const chatId = update.message.chat.id, text = String(update.message.text).trim();
+      const isOwner = OWNER_ID && String(update.from.id) === String(OWNER_ID);
+      if (isOwner && (text === '/start' || text === '/menu')) return cmdStart(chatId);
+    }
+  } catch (e) {}
 });
 
 /* ═══ 404 ═══ */
