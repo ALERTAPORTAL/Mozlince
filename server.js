@@ -1179,6 +1179,14 @@ const SUPPORT_SESSIONS = new Map();
 const DM_SESSIONS = new Map();
 const USER_LANG = new Map();
 
+/* ═══ 404 ═══ */
+app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
+
+/* ═══ START ═══ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ◈ TELEGRAM BOT ORIGINAL RESTAURADO
+   ═══════════════════════════════════════════════════════════════ */
 const TG_API = TELEGRAM_TOKEN ? `https://api.telegram.org/bot${TELEGRAM_TOKEN}` : null;
 async function tgSend(chatId, text, keyboard=null) {
   if (!TG_API) return false;
@@ -1190,42 +1198,51 @@ async function tgEdit(chatId, messageId, text, keyboard=null) {
 }
 async function tgAnswer(id, text='') { if (!TG_API) return; try { await fetch(`${TG_API}/answerCallbackQuery`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({callback_query_id:id,text})}); } catch {} }
 
-const UI = {
-  header: (lang='pt') => {
-    return `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.5.0</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>`;
-  },
-  sep: '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
-};
-
-function menuPrincipal(lang='pt') {
+function menuPrincipal() {
   const hora = new Date().toLocaleString('pt-BR', { timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit' });
   return {
-    texto: `${UI.header(lang)}\n\n<b>⌬  PAINEL DE CONTROLE</b>\n<code>${UI.sep}</code>\n<b>◔</b> ${hora}   <b>◉</b> online   <b>⟡</b> seguro ES256\n<code>${UI.sep}</code>\n\n<i>Selecione uma operação abaixo</i>`,
+    texto: `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.5.0</b>\n<i>Motor de Licenças Premium · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>\n\n<b>⌬  PAINEL DE CONTROLE</b>\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n<b>◔</b> ${hora}   <b>◉</b> online   <b>⟡</b> seguro ES256\n<code>╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌</code>\n\n<i>Selecione uma operação abaixo</i>`,
     teclado: { inline_keyboard: [
       [{ text: '⚡  Gerar Licença', callback_data:'m_gerar' }],
       [{ text: '◈  Minhas Chaves', callback_data:'m_listar' }, { text: '◧  Estatísticas', callback_data:'m_stats' }],
       [{ text: '⟡  Vincular', callback_data:'m_vincular' }, { text: '⌬  Desvincular', callback_data:'m_desvincular' }],
       [{ text: '◉  Consultar', callback_data:'m_consultar' }],
       [{ text: '✦  Tabela de Preços', callback_data:'m_precos' }],
-      [{ text: '✉  Enviar Mensagem', callback_data:'m_dm' }, { text: '💬  Conversas', callback_data:'m_convs' }],
       [{ text: '✆  Suporte', callback_data:'m_contacto' }],
       [{ text: '◐  Idioma / Language', callback_data:'m_lang' }],
       [{ text: '?  Ajuda', callback_data:'m_ajuda' }, { text: '⚠  Zona de Perigo', callback_data:'m_perigo' }]
     ]}
   };
 }
-async function cmdStart(chatId, msgId=null) { const m = menuPrincipal('pt'); if (msgId) await tgEdit(chatId, msgId, m.texto, m.teclado); else await tgSend(chatId, m.texto, m.teclado); }
 
 app.post('/telegram-webhook', async (req, res) => {
   res.sendStatus(200);
   const update = req.body || {};
+  
+  // Ignora updates se não for o Owner
+  if (update.message && OWNER_ID && String(update.message.from.id) !== String(OWNER_ID)) return;
+  if (update.callback_query && OWNER_ID && String(update.callback_query.from.id) !== String(OWNER_ID)) return;
+
   try {
+    if (update.message && update.message.text) {
+      const chatId = update.message.chat.id;
+      const text = String(update.message.text || '').trim();
+      
+      if (text === '/start' || text === '/menu') {
+        const m = menuPrincipal();
+        await tgSend(chatId, m.texto, m.teclado);
+      }
+    }
+
     if (update.callback_query) {
       const cb = update.callback_query, chatId = cb.message.chat.id, msgId = cb.message.message_id, data = cb.data;
-      const isOwner = OWNER_ID && String(cb.from.id) === String(OWNER_ID);
       await tgAnswer(cb.id);
-      if (!isOwner) return;
-      if (data === 'm_home') return cmdStart(chatId, msgId);
+
+      if (data === 'm_home') {
+        const m = menuPrincipal();
+        return tgEdit(chatId, msgId, m.texto, m.teclado);
+      }
+
       if (data === 'm_gerar') {
         const kb = { inline_keyboard: [] };
         const entries = Object.entries(PACOTES);
@@ -1235,8 +1252,9 @@ app.post('/telegram-webhook', async (req, res) => {
           kb.inline_keyboard.push(linha);
         }
         kb.inline_keyboard.push([{ text: '‹  Voltar', callback_data:'m_home' }]);
-        return tgEdit(chatId, msgId, `${UI.header()}\n\n<b>⚡  Gerar Licença</b>\n<code>${UI.sep}</code>\n<i>Escolha um plano abaixo:</i>`, kb);
+        return tgEdit(chatId, msgId, '<b>⚡  Gerar Licença</b>\n<i>Escolha um plano abaixo:</i>', kb);
       }
+
       if (data.startsWith('g_')) {
         const pk = data.substring(2), p = PACOTES[pk];
         if (!p) return;
@@ -1244,28 +1262,21 @@ app.post('/telegram-webhook', async (req, res) => {
         const agora = Date.now();
         const expira = p.lifetime ? (agora + 100*365*24*60*60*1000) : (agora + p.dias*24*60*60*1000);
         await redisSet(chave, { chave, plano: pk, planoNome: p.nome, preco: p.preco, dias: p.dias, lifetime: p.lifetime === true, criadaEm: agora, expiraEm: expira, ativa: true, v: 8 });
-        return tgEdit(chatId, msgId, `${UI.header()}\n\n<b>✓  LICENÇA EMITIDA</b>\n<code>${UI.sep}</code>\n\n<b>Chave:</b>\n<code>${chave}</code>\n\n<b>Plano:</b> ${p.nome}\n<b>Preço:</b> ${precoFmt(p.preco)}\n<b>Expira:</b> ${p.lifetime ? 'Nunca' : formatDate(expira)}`, { inline_keyboard: [[{ text: '‹  Menu', callback_data:'m_home' }]] });
+        return tgEdit(chatId, msgId, `<b>✓ LICENÇA EMITIDA</b>\n\n<b>Chave:</b>\n<code>${chave}</code>\n\n<b>Plano:</b> ${p.nome}\n<b>Expira:</b> ${p.lifetime ? 'Nunca' : formatDate(expira)}`, { inline_keyboard: [[{ text: '‹  Menu', callback_data:'m_home' }]] });
       }
+
       if (data === 'm_stats') {
-        const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-') && !k.startsWith('ASHEO-CAMPAIGN'));
-        let ativas=0, exp=0, vinc=0, receita=0;
-        for (const k of keys) { const l = await redisGet(k).catch(()=>null); if (!l) continue; if (l.ativa) ativas++; if (!l.lifetime && l.expiraEm < Date.now()) exp++; if (l.installId) vinc++; if (l.preco) receita += Number(l.preco) || 0; }
-        return tgEdit(chatId, msgId, `${UI.header()}\n\n<b>◧  Estatísticas</b>\n<code>${UI.sep}</code>\n\n<b>◈ Total:</b> <code>${keys.length}</code>\n<b>● Ativas:</b> <code>${ativas}</code>\n<b>○ Expiradas:</b> <code>${exp}</code>\n<b>⟡ Vinculadas:</b> <code>${vinc}</code>\n\n<code>${UI.sep}</code>\n<b>◆ Receita:</b> <code>${precoFmt(receita)}</code>`, { inline_keyboard: [[{ text: '‹  Menu', callback_data:'m_home' }]] });
+        const keys = (await redisScan('ASHEO-*')).filter(k => !k.startsWith('ASHEO-INSTALL-') && !k.startsWith('ASHEO-USER') && !k.startsWith('ASHEO-CONV-'));
+        let ativas=0;
+        for (const k of keys) { const l = await redisGet(k).catch(()=>null); if (l && l.ativa) ativas++; }
+        return tgEdit(chatId, msgId, `<b>◧ ESTATÍSTICAS</b>\n\n<b>Total:</b> ${keys.length}\n<b>Ativas:</b> ${ativas}`, { inline_keyboard: [[{ text: '‹  Menu', callback_data:'m_home' }]] });
       }
-      return cmdStart(chatId, msgId);
+
+      return tgEdit(chatId, msgId, 'Em desenvolvimento...', { inline_keyboard: [[{ text: '‹  Menu', callback_data:'m_home' }]] });
     }
-    if (update.message && update.message.text) {
-      const chatId = update.message.chat.id, text = String(update.message.text).trim();
-      const isOwner = OWNER_ID && String(update.from.id) === String(OWNER_ID);
-      if (isOwner && (text === '/start' || text === '/menu')) return cmdStart(chatId);
-    }
-  } catch (e) {}
+  } catch (e) { console.error('TG Error:', e); }
 });
 
-/* ═══ 404 ═══ */
-app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
-
-/* ═══ START ═══ */
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   banner();
