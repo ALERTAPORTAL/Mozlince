@@ -1595,8 +1595,14 @@ async function gwProxyHandler(req, res) {
 /* ═══════════════════════════════════════════════════════════════
    ◈ STRIPE 3DS2 DEFINITIVO (Mock API Antiga)
    ═══════════════════════════════════════════════════════════════ */
-app.all('/v1/gw/3ds2/*splat', (req, res) => {
-  log('DS2', '>>> CHEGOU NO SERVIDOR! Forcando Hit e fechando iframe...');
+
+
+
+/* ═══════════════════════════════════════════════════════════════
+   ◈ STRIPE 3DS2 REAL BYPASS (Fix Definitivo v9.5.0)
+   ═══════════════════════════════════════════════════════════════ */
+app.post('/v1/gw/3ds2/authenticate', (req, res) => {
+  log('DS2', '>>> EXTENSAO ENVIOU O 3DS2! Respondendo Mock...');
   
   const hitResponse = {
     status: "succeeded",
@@ -1604,13 +1610,11 @@ app.all('/v1/gw/3ds2/*splat', (req, res) => {
     object: "payment_intent",
     id: "pi_3M" + crypto.randomBytes(12).toString('hex'),
     client_secret: "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
-    amount: 1380,
-    currency: "usd",
-    payment_method: "pm_1M" + crypto.randomBytes(12).toString('hex'),
-    next_action: null,
+    next_action: null, // ESSENCIAL: impede a abertura da tela do banco
     three_d_secure: { authentication_flow: "challenge", result: "authenticated", version: "2.1.0" }
   };
 
+  // Headers que o inject.js lê para disparar o popup verde
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Expose-Headers', 'x-asheo-3ds2-verdict, x-asheo-swap-ok, x-asheo-swapped');
   res.setHeader('Content-Type', 'application/json');
@@ -1619,9 +1623,8 @@ app.all('/v1/gw/3ds2/*splat', (req, res) => {
   res.setHeader('x-asheo-swap-ok', 'true');
 
   res.status(200).json(hitResponse);
-  log('OK', '>>> HIT FORCADO ENVIADO E HEADERS CORRETOS!');
+  log('OK', '>>> HIT ENVIADO PARA A EXTENSAO!');
 });
-
 
 app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
 
