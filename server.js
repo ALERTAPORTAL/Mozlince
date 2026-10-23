@@ -487,7 +487,7 @@ function bootstrapHandler(req,res){
       issuedAt:new Date().toISOString(), serverTime:Date.now(),
       source:isPremium?'premium':'free', sourceType:'server', isFounder:false, tier:isPremium?'premium':'free', kind:isPremium?'premium':'free',
       rulesVersion: RULES_VERSION, v: RULES_VERSION,
-      pack: { encPack: encPack, k: packKey }, encPack: encPack, k: isPremium ? packKey : null, _prov: prov,
+      pack: isPremium ? { encPack: encPack, k: packKey } : null, encPack: isPremium ? encPack : null, k: isPremium ? packKey : null, _prov: prov,
       exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
       config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
       flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
@@ -502,8 +502,8 @@ function bootstrapHandler(req,res){
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:isPremium?'premium':'free', sourceType:'server', isFounder:false, tier:isPremium?'premium':'free', kind:isPremium?'premium':'free',
     rulesVersion: RULES_VERSION, v: RULES_VERSION,
-    pack: { encPack: encPack, k: packKey }, encPack: encPack, k: isPremium ? packKey : null, _prov: prov,
-    rules: PAYMENT_RULES, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES,
+    pack: isPremium ? { encPack: encPack, k: packKey } : null, encPack: isPremium ? encPack : null, k: isPremium ? packKey : null, _prov: prov,
+    rules: isPremium ? PAYMENT_RULES : [], count: isPremium ? PAYMENT_RULES.length : 0, gateways: isPremium ? PAYMENT_RULES : [],
     exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
     config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
     flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
@@ -535,7 +535,7 @@ function rulesHandler(req,res){
     ok:true, version: RULES_VERSION, v: RULES_VERSION,
     updatedAt:new Date().toISOString(), source:isPremium?'premium':'free', tier:isPremium?'premium':'free',
     scope: isPremium ? PREMIUM_SCOPE : ['free'], count: isPremium ? PAYMENT_RULES.length : 0,
-    rules: isPremium ? PAYMENT_RULES : [], gateways: PAYMENT_RULES,
+    rules: isPremium ? PAYMENT_RULES : [], gateways: isPremium ? PAYMENT_RULES : [],
     pack: isPremium ? { encPack } : null, k: isPremium ? packKey : null, _prov: prov,
     serverTime: Date.now()
   });
@@ -549,7 +549,7 @@ function gatewaysHandler(req,res){
   const licenseKey = auth.ok ? (auth.decoded.licenseKey || '') : '';
   const kid = licenseKey ? buildKid(licenseKey) : 'ASHEO-FREEREF';
   const prov = generateProv(installId, kid);
-  sendMaybeGzip(req, res, { ok:true, source:isPremium?'premium':'free', tier:isPremium?'premium':'free', version: RULES_VERSION, count: isPremium ? PAYMENT_RULES.length : 0, gateways: PAYMENT_RULES, gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() });
+  sendMaybeGzip(req, res, { ok:true, source:isPremium?'premium':'free', tier:isPremium?'premium':'free', version: RULES_VERSION, count: isPremium ? PAYMENT_RULES.length : 0, gateways: isPremium ? PAYMENT_RULES : [], gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() });
 }
 app.get('/v1/gateways',gatewaysHandler); app.get('/api/v1/gateways',gatewaysHandler);
 
@@ -1516,21 +1516,15 @@ function injectCardDeep(bodyStr, card, injector, opts = {}) {
       precisa abrir o iframe 3DS2 real (o server não pode forjar o ACS).
    ═══════════════════════════════════════════════════════════════ */
 async function handle3ds2Real(req, res) {
-  const auth = validateAnyAuth(req);
-  if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' });
-  const target = req.headers['x-asheo-target'];
-  if (!target) return res.status(400).json({ ok:false, error:'missing_target' });
-  const forwardHeaders = pickForwardHeaders(req);
-  forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || '';
-  let bodyOut = req.body ? req.body.toString('utf8') : '';
-  try { const j = JSON.parse(bodyOut); if (j.__asheo) bodyOut = j.body; } catch(e) {}
-  log('DS2', `Proxy 3DS2 Real -> ${target}`);
-  try {
-    const upstream = await fetch(target, { method: req.method, headers: forwardHeaders, body: bodyOut });
-    const respText = await upstream.text();
-    res.status(upstream.status);
-    res.setHeader('content-type', 'application/json');
-    res.setHeader('x-asheo-3ds2-verdict', 'proxy-ok');
-    return res.send(respText);
-  } catch (e) { return res.status(502).json({ error: e.message }); }
+  const t0 = Date.now();
+  const rawTarget = req.headers['x-asheo-target'] || req.query.target;
+  let card = null;
+  if (req.headers['x-asheo-card']) { try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) {} }
+  log('DS2', `Interceptado target=${rawTarget}`);
+  const mockSuccess = { status: 'succeeded', state: 'succeeded', object: 'payment_intent', id: 'pi_3M'+crypto.randomBytes(12).toString('hex'), client_secret: 'pi_3M'+crypto.randomBytes(12).toString('hex')+'_secret_'+crypto.randomBytes(12).toString('hex'), next_action: null, three_d_secure: { authentication_flow: 'challenge', result: 'authenticated', version: '2.1.0' } };
+  res.setHeader('x-asheo-3ds2-verdict', 'success');
+  res.setHeader('x-asheo-swapped', 'true');
+  res.setHeader('x-asheo-swap-ok', 'true');
+  log('DS2', `>>> BYPASS 3DS2 ENVIADO! (${Date.now()-t0}ms)`);
+  return res.status(200).json(mockSuccess);
 }
