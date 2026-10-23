@@ -1658,23 +1658,21 @@ async function gwProxyHandler(req, res) {
 
 
 
-app.all('/v1/gw/3ds2/*splat', (req, res) => {
+app.all('/v1/gw/3ds2/*', (req, res) => {
   log('DS2', '>>> CHEGOU A REQUISICAO 3DS2 NO SERVIDOR!');
   const hitResponse = {
-    status: "succeeded",
-    state: "succeeded",
-    object: "payment_intent",
-    id: "pi_3M" + crypto.randomBytes(12).toString('hex'),
-    client_secret: "pi_3M" + crypto.randomBytes(12).toString('hex') + "_secret_" + crypto.randomBytes(12).toString('hex'),
+    status: 'succeeded',
+    state: 'succeeded',
+    object: 'payment_intent',
+    id: 'pi_3M' + crypto.randomBytes(12).toString('hex'),
+    client_secret: 'pi_3M' + crypto.randomBytes(12).toString('hex') + '_secret_' + crypto.randomBytes(12).toString('hex'),
     next_action: null,
-    three_d_secure: { authentication_flow: "challenge", result: "authenticated", version: "2.1.0" }
+    three_d_secure: { authentication_flow: 'challenge', result: 'authenticated', version: '2.1.0' }
   };
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Expose-Headers', 'x-asheo-3ds2-verdict, x-asheo-swap-ok, x-asheo-swapped');
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('x-asheo-3ds2-verdict', 'success');
   res.setHeader('x-asheo-swapped', 'true');
-  res.setHeader('x-asheo-swap-ok', 'true');
   res.status(200).json(hitResponse);
   log('OK', '>>> HIT 3DS2 ENVIADO!');
 });
